@@ -29,7 +29,7 @@ import {
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { commandData } from "@/lib/demo-data";
-import { ModuleKey, useOpsStore, WorkspaceRole } from "@/lib/ops-store";
+import { ModuleKey, ResourceAllocation, StaffMember, useOpsStore, WorkspaceRole } from "@/lib/ops-store";
 import {
   defaultSurveyQuestions,
   questionTypes,
@@ -69,11 +69,13 @@ export function CommandCenter() {
     brandColor,
     customVisits,
     onboardedCandidates,
+    deletedCandidateNames,
     candidateStatuses,
     passwordEvents,
     staffPasswords,
     socialHandles,
     fieldAgents,
+    staffMembers,
     resourceAllocations,
     platformParties,
     publishedMessages,
@@ -97,8 +99,11 @@ export function CommandCenter() {
     updateSocialHandle,
     addFieldAgent,
     updateFieldAgent,
+    addStaffMember,
+    updateStaffAccess,
     addResourceAllocation,
     addPoliticalParty,
+    deletePoliticalParty,
     publishMessage,
     sendAfricaTalkingMessage
   } = useOpsStore();
@@ -114,7 +119,7 @@ export function CommandCenter() {
   }
 
   const creatorClimateMetrics = [
-    { label: "Tracked candidates", value: String([...onboardedCandidates, ...commandData.candidates].length), change: 12, tone: "positive" },
+    { label: "Tracked candidates", value: String([...onboardedCandidates, ...commandData.candidates.filter((candidate) => !deletedCandidateNames.includes(candidate.name))].length), change: 12, tone: "positive" },
     { label: "Regions monitored", value: String(commandData.regions.length), change: 4, tone: "neutral" },
     { label: "Platform access users", value: String(commandData.candidateAccounts.length + [...onboardedCandidates, ...commandData.candidates].length), change: 9, tone: "positive" },
     { label: "Climate risk index", value: "Medium", change: -3, tone: "neutral" }
@@ -220,7 +225,11 @@ export function CommandCenter() {
         {activeModule === "surveys" ? <SurveyModule /> : null}
         {activeModule === "alerts" ? <AlertsModule /> : null}
         {activeModule === "deployment" ? (
-          <DeploymentModule resourceAllocations={resourceAllocations} addResourceAllocation={addResourceAllocation} />
+          <DeploymentModule
+            resourceAllocations={resourceAllocations}
+            addResourceAllocation={addResourceAllocation}
+            sendAfricaTalkingMessage={sendAfricaTalkingMessage}
+          />
         ) : null}
         {activeModule === "voters" ? (
           <VoterImportModule uploadedVoterFile={uploadedVoterFile} setUploadedVoterFile={setUploadedVoterFile} />
@@ -232,12 +241,14 @@ export function CommandCenter() {
           <CreatorModule
             addCandidate={addCandidate}
             onboardedCandidates={onboardedCandidates}
+            deletedCandidateNames={deletedCandidateNames}
             candidateStatuses={candidateStatuses}
             passwordEvents={passwordEvents}
             changePassword={changePassword}
             suspendCandidate={suspendCandidate}
             deleteCandidate={deleteCandidate}
             addPoliticalParty={addPoliticalParty}
+            deletePoliticalParty={deletePoliticalParty}
             platformParties={platformParties}
           />
         ) : null}
@@ -250,6 +261,9 @@ export function CommandCenter() {
             socialHandles={socialHandles}
             addSocialHandle={addSocialHandle}
             updateSocialHandle={updateSocialHandle}
+            staffMembers={staffMembers}
+            addStaffMember={addStaffMember}
+            updateStaffAccess={updateStaffAccess}
           />
         ) : null}
         {activeModule === "comms" ? (
@@ -777,9 +791,14 @@ function CrmModule() {
 }
 
 function SurveyModule() {
-  const baseUrl = "http://localhost:3000/survey";
+  const [baseUrl, setBaseUrl] = useState("http://localhost:3000/survey");
   const [selectedSlug, setSelectedSlug] = useState(commandData.surveys[0].slug);
   const [questions, setQuestions] = useState<SurveyQuestion[]>(defaultSurveyQuestions[selectedSlug]);
+  const [qrVersions, setQrVersions] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    setBaseUrl(`${window.location.origin}/survey`);
+  }, []);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKeyForSurvey(selectedSlug));
@@ -840,7 +859,15 @@ function SurveyModule() {
                 <p className="mt-3 text-sm text-slate-300">Sentiment score {survey.sentiment}</p>
                 <p className="mt-2 text-xs text-slate-400">Target: {survey.target}</p>
               </button>
-              <QrPreview value={`${baseUrl}/${survey.slug}`} />
+              <QrPreview value={`${baseUrl}/${survey.slug}?qr=${qrVersions[survey.slug] ?? 1}`} />
+              <button
+                onClick={() => setQrVersions((versions) => ({ ...versions, [survey.slug]: Date.now() }))}
+                className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-md border border-white/10 px-3 text-sm font-semibold text-slate-200 hover:bg-white/[.06]"
+                type="button"
+              >
+                <QrCode size={16} />
+                Regenerate QR
+              </button>
               <a className="mt-3 block rounded-md border border-sky-300/40 px-3 py-2 text-center text-sm font-semibold text-sky-100 hover:bg-sky-300/10" href={`/survey/${survey.slug}`}>
                 Open field form
               </a>
@@ -892,15 +919,11 @@ function SurveyModule() {
 }
 
 function QrPreview({ value }: { value: string }) {
-  const cells = Array.from({ length: 49 }, (_, index) => {
-    const code = value.charCodeAt(index % value.length);
-    return (code + index * 7) % 3 !== 0;
-  });
+  const qrSource = `https://api.qrserver.com/v1/create-qr-code/?size=132x132&margin=8&data=${encodeURIComponent(value)}`;
   return (
-    <div className="mt-4 inline-grid grid-cols-7 gap-0.5 rounded-md bg-white p-2" aria-label={`QR preview for ${value}`}>
-      {cells.map((filled, index) => (
-        <span key={index} className={`h-2 w-2 ${filled ? "bg-slate-950" : "bg-white"}`} />
-      ))}
+    <div className="mt-4 inline-flex flex-col gap-2">
+      <img src={qrSource} alt={`QR code for ${value}`} className="h-32 w-32 rounded-md bg-white p-1" />
+      <p className="max-w-52 break-all text-xs text-slate-500">{value}</p>
     </div>
   );
 }
@@ -923,32 +946,75 @@ function AlertsModule() {
 
 function DeploymentModule({
   resourceAllocations,
-  addResourceAllocation
+  addResourceAllocation,
+  sendAfricaTalkingMessage
 }: {
-  resourceAllocations: Array<{ resource: string; region: string; quantity: number; contact: string; status: string }>;
-  addResourceAllocation: (allocation: { resource: string; region: string; quantity: number; contact: string; status: string }) => void;
+  resourceAllocations: ResourceAllocation[];
+  addResourceAllocation: (allocation: ResourceAllocation) => void;
+  sendAfricaTalkingMessage: (message: { target: string; message: string; channel: string }) => void;
 }) {
   const [resource, setResource] = useState("Volunteer kits");
   const [resourceRegion, setResourceRegion] = useState("Nairobi West");
   const [quantity, setQuantity] = useState(100);
-  const [contact, setContact] = useState("Grace Atieno");
+  const [recipientName, setRecipientName] = useState("Grace Atieno");
+  const [recipientPhone, setRecipientPhone] = useState("+254733444555");
+  const [location, setLocation] = useState("Nairobi West Primary");
+  const groupedAllocations = useMemo(
+    () =>
+      resourceAllocations.reduce<Record<string, ResourceAllocation[]>>((groups, allocation) => {
+        groups[allocation.resource] = [...(groups[allocation.resource] ?? []), allocation];
+        return groups;
+      }, {}),
+    [resourceAllocations]
+  );
+
   return (
     <Panel title="Resource Deployment" icon={<Truck size={20} />}>
-      <div className="mb-4 grid gap-2 md:grid-cols-[1fr_1fr_120px_1fr_auto]">
-        <input value={resource} onChange={(event) => setResource(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
-        <input value={resourceRegion} onChange={(event) => setResourceRegion(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+      <div className="mb-4 grid gap-2 lg:grid-cols-[1fr_1fr_110px_1fr_1fr_1fr_auto]">
+        <input value={resource} onChange={(event) => setResource(event.target.value)} placeholder="Resource" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+        <input value={resourceRegion} onChange={(event) => setResourceRegion(event.target.value)} placeholder="Region" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
         <input value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} type="number" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
-        <input value={contact} onChange={(event) => setContact(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
-        <button onClick={() => addResourceAllocation({ resource, region: resourceRegion, quantity, contact, status: "Allocated" })} className="h-11 rounded-md bg-sky-300 px-4 font-semibold text-slate-950">Allocate</button>
+        <input value={recipientName} onChange={(event) => setRecipientName(event.target.value)} placeholder="Recipient name" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+        <input value={recipientPhone} onChange={(event) => setRecipientPhone(event.target.value)} placeholder="Phone" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+        <input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Location" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+        <button
+          onClick={() => addResourceAllocation({ resource, region: resourceRegion, quantity, contact: recipientName, recipientName, recipientPhone, location, status: "Allocated" })}
+          className="h-11 rounded-md bg-sky-300 px-4 font-semibold text-slate-950"
+        >
+          Allocate
+        </button>
       </div>
-      <div className="grid gap-3 md:grid-cols-3">
-        {resourceAllocations.map((deployment) => (
-          <article key={deployment.resource} className="rounded-md border border-white/10 bg-white/[.035] p-4">
-            <p className="text-xs text-slate-400">{deployment.region}</p>
-            <h3 className="mt-2 font-semibold text-white">{deployment.resource}</h3>
-            <p className="mt-3 text-sm text-slate-300">{deployment.quantity} units / {deployment.status}</p>
-            <p className="mt-2 text-xs text-sky-100">Responsible contact: {deployment.contact}</p>
-          </article>
+      <div className="space-y-4">
+        {Object.entries(groupedAllocations).map(([resourceName, allocations]) => (
+          <section key={resourceName} className="rounded-md border border-white/10 bg-white/[.025] p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <h3 className="font-semibold text-white">{resourceName}</h3>
+              <span className="text-sm text-sky-100">{allocations.length} recipients / {allocations.reduce((sum, item) => sum + item.quantity, 0)} units</span>
+            </div>
+            <div className="mt-3 grid gap-3 lg:grid-cols-2">
+              {allocations.map((deployment) => (
+                <article key={`${deployment.resource}-${deployment.recipientPhone}-${deployment.location}`} className="rounded-md border border-white/10 bg-slate-950/35 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs text-slate-400">{deployment.region} / {deployment.location}</p>
+                      <h4 className="mt-1 font-semibold text-white">{deployment.recipientName}</h4>
+                    </div>
+                    <span className="text-xs text-emerald-200">{deployment.status}</span>
+                  </div>
+                  <p className="mt-3 text-sm text-slate-300">{deployment.quantity} units allocated</p>
+                  <p className="mt-2 text-sm text-sky-100">{deployment.recipientPhone}</p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button onClick={() => sendAfricaTalkingMessage({ target: deployment.recipientPhone, channel: "SMS", message: `${deployment.recipientName}, confirm receipt of ${deployment.quantity} ${deployment.resource} for ${deployment.location}.` })} className="rounded-md border border-sky-300/40 px-2 py-2 text-xs font-semibold text-sky-100">
+                      SMS
+                    </button>
+                    <button onClick={() => sendAfricaTalkingMessage({ target: deployment.recipientPhone, channel: "WhatsApp", message: `${deployment.recipientName}, confirm receipt of ${deployment.quantity} ${deployment.resource} for ${deployment.location}.` })} className="rounded-md border border-emerald-300/40 px-2 py-2 text-xs font-semibold text-emerald-100">
+                      WhatsApp
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
         ))}
       </div>
     </Panel>
@@ -1043,31 +1109,35 @@ function CreatorClimateModule() {
 function CreatorModule({
   addCandidate,
   onboardedCandidates,
+  deletedCandidateNames,
   candidateStatuses,
   passwordEvents,
   changePassword,
   suspendCandidate,
   deleteCandidate,
   addPoliticalParty,
+  deletePoliticalParty,
   platformParties
 }: {
   addCandidate: (candidate: { name: string; office: string; party: string; region: string }) => void;
   onboardedCandidates: Array<{ name: string; office: string; party: string; region: string }>;
+  deletedCandidateNames: string[];
   candidateStatuses: Record<string, "Active" | "Suspended">;
   passwordEvents: Array<{ actor: string; target: string; changedAt: string }>;
   changePassword: (target: string) => void;
   suspendCandidate: (name: string) => void;
   deleteCandidate: (name: string) => void;
   addPoliticalParty: (party: { name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }) => void;
+  deletePoliticalParty: (abbreviation: string) => void;
   platformParties: Array<{ name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }>;
 }) {
   const [name, setName] = useState("New Candidate");
   const [office, setOffice] = useState("Governor");
-  const [party, setParty] = useState(commandData.parties[0].abbreviation);
+  const [party, setParty] = useState(platformParties[0]?.abbreviation ?? "");
   const [region, setRegion] = useState("Nairobi County");
   const [partyName, setPartyName] = useState("New Political Party");
   const [partyAbbr, setPartyAbbr] = useState("NPP");
-  const candidates = [...onboardedCandidates, ...commandData.candidates];
+  const candidates = [...onboardedCandidates, ...commandData.candidates.filter((candidate) => !deletedCandidateNames.includes(candidate.name))];
   const activeCandidateCount = candidates.filter((candidate) => candidateStatuses[candidate.name] !== "Suspended").length;
   const accessCount = commandData.candidateAccounts.length + activeCandidateCount;
 
@@ -1078,7 +1148,7 @@ function CreatorModule({
           <input value={name} onChange={(event) => setName(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
           <input value={office} onChange={(event) => setOffice(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
           <select value={party} onChange={(event) => setParty(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
-            {commandData.parties.map((item) => <option key={item.abbreviation}>{item.abbreviation}</option>)}
+            {platformParties.map((item) => <option key={item.abbreviation} value={item.abbreviation}>{item.name} ({item.abbreviation})</option>)}
           </select>
           <input value={region} onChange={(event) => setRegion(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
           <button onClick={() => addCandidate({ name, office, party, region })} className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-sky-300 font-semibold text-slate-950 hover:bg-sky-200">
@@ -1138,7 +1208,13 @@ function CreatorModule({
           <div className="mb-4 grid gap-2 md:grid-cols-[1fr_120px_auto]">
             <input value={partyName} onChange={(event) => setPartyName(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
             <input value={partyAbbr} onChange={(event) => setPartyAbbr(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
-            <button onClick={() => addPoliticalParty({ name: partyName, abbreviation: partyAbbr, color: "#38bdf8", ideology: "Configured by creator", influenceScore: 50, sentimentScore: 0, strongholds: [], risks: [] })} className="h-11 rounded-md bg-sky-300 px-4 font-semibold text-slate-950">
+            <button
+              onClick={() => {
+                addPoliticalParty({ name: partyName, abbreviation: partyAbbr, color: "#38bdf8", ideology: "Configured by creator", influenceScore: 50, sentimentScore: 0, strongholds: [], risks: [] });
+                setParty(partyAbbr);
+              }}
+              className="h-11 rounded-md bg-sky-300 px-4 font-semibold text-slate-950"
+            >
               Add Party
             </button>
           </div>
@@ -1148,6 +1224,12 @@ function CreatorModule({
                 <p className="text-xs text-slate-400">{party.abbreviation}</p>
                 <h3 className="mt-2 font-semibold text-white">{party.name}</h3>
                 <p className="mt-2 text-sm text-slate-300">{party.ideology}</p>
+                <button
+                  onClick={() => deletePoliticalParty(party.abbreviation)}
+                  className="mt-4 rounded-md border border-rose-300/40 px-3 py-2 text-xs font-semibold text-rose-100 hover:bg-rose-300/10"
+                >
+                  Delete Party
+                </button>
               </article>
             ))}
           </div>
@@ -1164,7 +1246,10 @@ function AccessModule({
   setStaffPassword,
   socialHandles,
   addSocialHandle,
-  updateSocialHandle
+  updateSocialHandle,
+  staffMembers,
+  addStaffMember,
+  updateStaffAccess
 }: {
   changePassword: (target: string) => void;
   passwordEvents: Array<{ actor: string; target: string; changedAt: string }>;
@@ -1173,24 +1258,83 @@ function AccessModule({
   socialHandles: Array<{ network: string; handle: string; status: string; risk: string }>;
   addSocialHandle: (handle: { network: string; handle: string; status: string; risk: string }) => void;
   updateSocialHandle: (network: string, handle: string) => void;
+  staffMembers: StaffMember[];
+  addStaffMember: (member: StaffMember) => void;
+  updateStaffAccess: (email: string, access: ModuleKey[]) => void;
 }) {
   const [passwordDrafts, setPasswordDrafts] = useState<Record<string, string>>({});
   const [network, setNetwork] = useState("Instagram");
   const [handle, setHandle] = useState("@aminaofficial");
+  const [staffDraft, setStaffDraft] = useState<StaffMember>({
+    name: "New Staff Member",
+    email: "staff.member@campaign.local",
+    phone: "+254700000000",
+    role: "media",
+    access: ["social", "comms"],
+    status: "Active"
+  });
+  const assignableModules: ModuleKey[] = ["command", "field", "social", "ai", "crm", "surveys", "alerts", "deployment", "voters", "party", "customize", "comms"];
+  function toggleAccess(email: string, currentAccess: ModuleKey[], module: ModuleKey) {
+    updateStaffAccess(email, currentAccess.includes(module) ? currentAccess.filter((item) => item !== module) : [...currentAccess, module]);
+  }
+  function toggleDraftAccess(module: ModuleKey) {
+    setStaffDraft((draft) => ({
+      ...draft,
+      access: draft.access.includes(module) ? draft.access.filter((item) => item !== module) : [...draft.access, module]
+    }));
+  }
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
-      <Panel title="Staff Access Control" icon={<Users size={20} />}>
+      <Panel title="Candidate Staff Registry" icon={<Users size={20} />}>
         <div className="space-y-3">
-          {commandData.staffRoles.map((staff) => (
-            <article key={staff.role} className="rounded-md border border-white/10 bg-white/[.035] p-4">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="font-semibold text-white">{staff.role}</h3>
-                <span className="text-sm text-sky-100">{staff.members} users</span>
+          <div className="rounded-md border border-sky-300/20 bg-sky-300/10 p-4">
+            <h3 className="font-semibold text-white">Register staff member</h3>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              <input value={staffDraft.name} onChange={(event) => setStaffDraft({ ...staffDraft, name: event.target.value })} placeholder="Full name" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+              <input value={staffDraft.email} onChange={(event) => setStaffDraft({ ...staffDraft, email: event.target.value })} placeholder="Email" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+              <input value={staffDraft.phone} onChange={(event) => setStaffDraft({ ...staffDraft, phone: event.target.value })} placeholder="Phone" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+              <select value={staffDraft.role} onChange={(event) => setStaffDraft({ ...staffDraft, role: event.target.value as WorkspaceRole })} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
+                <option value="media">Media team</option>
+                <option value="clerk">Clerk</option>
+                <option value="field">Field coordinator</option>
+              </select>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {assignableModules.map((module) => (
+                <button
+                  key={module}
+                  onClick={() => toggleDraftAccess(module)}
+                  className={`rounded-sm border px-2 py-1 text-xs font-semibold ${staffDraft.access.includes(module) ? "border-sky-300 bg-sky-300 text-slate-950" : "border-white/10 text-slate-300"}`}
+                  type="button"
+                >
+                  {module}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => addStaffMember(staffDraft)} className="mt-3 h-11 w-full rounded-md bg-sky-300 font-semibold text-slate-950">
+              Register Staff
+            </button>
+          </div>
+          {staffMembers.map((staff) => (
+            <article key={staff.email} className="rounded-md border border-white/10 bg-white/[.035] p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="font-semibold text-white">{staff.name}</h3>
+                  <p className="mt-1 text-sm text-slate-400">{staff.email}</p>
+                  <p className="mt-1 text-sm text-sky-100">{staff.phone}</p>
+                </div>
+                <span className="rounded-sm border border-emerald-300/30 px-2 py-1 text-xs text-emerald-100">{staff.role}</span>
               </div>
-              <p className="mt-2 text-sm leading-6 text-slate-300">{staff.purpose}</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                {staff.access.map((item) => (
-                  <span key={item} className="rounded-sm border border-sky-300/30 px-2 py-1 text-xs text-sky-100">{item}</span>
+                {assignableModules.map((module) => (
+                  <button
+                    key={module}
+                    onClick={() => toggleAccess(staff.email, staff.access, module)}
+                    className={`rounded-sm border px-2 py-1 text-xs font-semibold ${staff.access.includes(module) ? "border-sky-300 bg-sky-300 text-slate-950" : "border-white/10 text-slate-300"}`}
+                    type="button"
+                  >
+                    {module}
+                  </button>
                 ))}
               </div>
             </article>
@@ -1198,11 +1342,11 @@ function AccessModule({
           <div className="rounded-md border border-sky-300/20 bg-sky-300/10 p-4">
             <h3 className="font-semibold text-white">Password control</h3>
             <div className="mt-3 grid gap-2">
-              {commandData.candidateAccounts.map((account) => (
-                <div key={account.username} className="rounded-md border border-white/10 bg-slate-950/40 p-3">
-                  <p className="text-sm font-semibold text-white">{account.role}: {account.username}</p>
-                  <input value={passwordDrafts[account.username] ?? ""} onChange={(event) => setPasswordDrafts({ ...passwordDrafts, [account.username]: event.target.value })} placeholder={staffPasswords[account.username] ?? "New password"} className="mt-2 h-10 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
-                  <button onClick={() => setStaffPassword(account.username, passwordDrafts[account.username] || "ManualPassword123!")} className="mt-2 rounded-md border border-sky-300/40 px-2 py-1 text-xs font-semibold text-sky-100">
+              {staffMembers.map((account) => (
+                <div key={account.email} className="rounded-md border border-white/10 bg-slate-950/40 p-3">
+                  <p className="text-sm font-semibold text-white">{account.name}: {account.email}</p>
+                  <input value={passwordDrafts[account.email] ?? ""} onChange={(event) => setPasswordDrafts({ ...passwordDrafts, [account.email]: event.target.value })} placeholder={staffPasswords[account.email] ?? "New password"} className="mt-2 h-10 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+                  <button onClick={() => setStaffPassword(account.email, passwordDrafts[account.email] || "ManualPassword123!")} className="mt-2 rounded-md border border-sky-300/40 px-2 py-1 text-xs font-semibold text-sky-100">
                     Set specific password
                   </button>
                 </div>
