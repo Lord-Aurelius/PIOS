@@ -39,6 +39,14 @@ export type ResourceAllocation = {
   status: string;
 };
 
+export type CandidateLoginAccount = {
+  candidateName: string;
+  userKey: string;
+  username: string;
+  password: string;
+  status: "Active" | "Suspended";
+};
+
 export type LoginResult = {
   ok: boolean;
   message: string;
@@ -61,6 +69,7 @@ type OpsState = {
   brandColor: string;
   customVisits: Array<{ title: string; type: string; region: string; attendance: number; sentiment: number; x: number; y: number }>;
   onboardedCandidates: Array<{ name: string; office: string; party: string; region: string }>;
+  candidateLoginAccounts: CandidateLoginAccount[];
   deletedCandidateNames: string[];
   candidateStatuses: Record<string, "Active" | "Suspended">;
   passwordEvents: Array<{ actor: string; target: string; changedAt: string }>;
@@ -80,7 +89,7 @@ type OpsState = {
   addFieldDraft: (draft: { title: string; region: string; type: string }) => void;
   setSelectedParty: (selectedParty: string) => void;
   setUploadedVoterFile: (uploadedVoterFile: string) => void;
-  addCandidate: (candidate: { name: string; office: string; party: string; region: string }) => void;
+  addCandidate: (candidate: { name: string; office: string; party: string; region: string; userKey: string; username: string; password: string }) => void;
   addVisitToSelectedRegion: () => void;
   updateCampaignProfile: (profile: { campaignName: string; candidateName: string; campaignSlogan: string; brandColor: string }) => void;
   changePassword: (target: string) => void;
@@ -91,6 +100,7 @@ type OpsState = {
   updateSocialHandle: (network: string, handle: string) => void;
   addFieldAgent: (agent: { name: string; phone: string; pollingStation: string; ward: string; status: string }) => void;
   updateFieldAgent: (phone: string, patch: Partial<{ name: string; phone: string; pollingStation: string; ward: string; status: string }>) => void;
+  deleteFieldAgent: (phone: string) => void;
   addStaffMember: (member: StaffMember) => void;
   updateStaffAccess: (email: string, access: ModuleKey[]) => void;
   addResourceAllocation: (allocation: ResourceAllocation) => void;
@@ -100,7 +110,7 @@ type OpsState = {
   sendAfricaTalkingMessage: (message: { target: string; message: string; channel: string }) => void;
 };
 
-export const useOpsStore = create<OpsState>((set) => ({
+export const useOpsStore = create<OpsState>((set, get) => ({
   isAuthenticated: false,
   workspaceRole: "candidate",
   activeIdentity: "",
@@ -117,6 +127,7 @@ export const useOpsStore = create<OpsState>((set) => ({
   brandColor: commandData.parties[0].color,
   customVisits: [],
   onboardedCandidates: [],
+  candidateLoginAccounts: [],
   deletedCandidateNames: [],
   candidateStatuses: Object.fromEntries(commandData.candidates.map((candidate) => [candidate.name, candidate.status === "Onboarding" ? "Active" : candidate.status])) as Record<string, "Active" | "Suspended">,
   passwordEvents: [],
@@ -139,12 +150,27 @@ export const useOpsStore = create<OpsState>((set) => ({
   publishedMessages: [],
   sentMessages: [],
   login: (credentials) => {
-    const account = commandData.demoAccounts.find(
+    const demoAccount = commandData.demoAccounts.find(
       (item) =>
         item.userKey.toLowerCase() === credentials.userKey.trim().toLowerCase() &&
         item.username.toLowerCase() === credentials.username.trim().toLowerCase() &&
         item.password === credentials.password
     );
+    const candidateAccount = get().candidateLoginAccounts.find(
+      (item) =>
+        item.status === "Active" &&
+        item.userKey.toLowerCase() === credentials.userKey.trim().toLowerCase() &&
+        item.username.toLowerCase() === credentials.username.trim().toLowerCase() &&
+        item.password === credentials.password
+    );
+    const staffAccount = get().staffMembers.find(
+      (item) =>
+        item.status === "Active" &&
+        credentials.userKey.trim().length > 0 &&
+        item.email.toLowerCase() === credentials.username.trim().toLowerCase() &&
+        get().staffPasswords[item.email] === credentials.password
+    );
+    const account = demoAccount ?? (candidateAccount ? { username: candidateAccount.username, role: "candidate" } : undefined) ?? (staffAccount ? { username: staffAccount.email, role: staffAccount.role } : undefined);
     if (!account) {
       set({ loginError: "Invalid user key, username, or password." });
       return { ok: false, message: "Invalid user key, username, or password." };
@@ -172,7 +198,11 @@ export const useOpsStore = create<OpsState>((set) => ({
   setUploadedVoterFile: (uploadedVoterFile) => set({ uploadedVoterFile }),
   addCandidate: (candidate) =>
     set((state) => ({
-      onboardedCandidates: [candidate, ...state.onboardedCandidates],
+      onboardedCandidates: [{ name: candidate.name, office: candidate.office, party: candidate.party, region: candidate.region }, ...state.onboardedCandidates],
+      candidateLoginAccounts: [
+        { candidateName: candidate.name, userKey: candidate.userKey, username: candidate.username, password: candidate.password, status: "Active" },
+        ...state.candidateLoginAccounts
+      ],
       candidateStatuses: { ...state.candidateStatuses, [candidate.name]: "Active" }
     })),
   addVisitToSelectedRegion: () =>
@@ -199,10 +229,14 @@ export const useOpsStore = create<OpsState>((set) => ({
       ]
     })),
   suspendCandidate: (name) =>
-    set((state) => ({ candidateStatuses: { ...state.candidateStatuses, [name]: "Suspended" } })),
+    set((state) => ({
+      candidateStatuses: { ...state.candidateStatuses, [name]: "Suspended" },
+      candidateLoginAccounts: state.candidateLoginAccounts.map((account) => (account.candidateName === name ? { ...account, status: "Suspended" } : account))
+    })),
   deleteCandidate: (name) =>
     set((state) => ({
       onboardedCandidates: state.onboardedCandidates.filter((candidate) => candidate.name !== name),
+      candidateLoginAccounts: state.candidateLoginAccounts.filter((account) => account.candidateName !== name),
       deletedCandidateNames: [...state.deletedCandidateNames, name],
       candidateStatuses: { ...state.candidateStatuses, [name]: "Suspended" }
     })),
@@ -223,6 +257,10 @@ export const useOpsStore = create<OpsState>((set) => ({
   updateFieldAgent: (phone, patch) =>
     set((state) => ({
       fieldAgents: state.fieldAgents.map((agent) => (agent.phone === phone ? { ...agent, ...patch } : agent))
+    })),
+  deleteFieldAgent: (phone) =>
+    set((state) => ({
+      fieldAgents: state.fieldAgents.filter((agent) => agent.phone !== phone)
     })),
   addStaffMember: (member) =>
     set((state) => ({

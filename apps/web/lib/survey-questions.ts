@@ -7,6 +7,13 @@ export type SurveyQuestion = {
   options?: string[];
 };
 
+export type SurveyResponse = {
+  id: string;
+  slug: string;
+  submittedAt: string;
+  answers: Record<string, string | string[]>;
+};
+
 export const questionTypes: Array<{ value: SurveyQuestionType; label: string }> = [
   { value: "SHORT_TEXT", label: "Short text" },
   { value: "SINGLE_CHOICE", label: "Single choice" },
@@ -50,4 +57,8 @@ export const defaultSurveyQuestions: Record<string, SurveyQuestion[]> = {
 
 export function storageKeyForSurvey(slug: string) {
   return `pios-survey:${slug}:questions`;
+}
+
+export function storageKeyForSurveyResponses(slug: string) {
+  return `pios-survey:${slug}:responses`;
 }

@@ -29,11 +29,13 @@ import {
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { commandData } from "@/lib/demo-data";
-import { ModuleKey, ResourceAllocation, StaffMember, useOpsStore, WorkspaceRole } from "@/lib/ops-store";
+import { CandidateLoginAccount, ModuleKey, ResourceAllocation, StaffMember, useOpsStore, WorkspaceRole } from "@/lib/ops-store";
 import {
   defaultSurveyQuestions,
   questionTypes,
+  storageKeyForSurveyResponses,
   storageKeyForSurvey,
+  SurveyResponse,
   SurveyQuestion
 } from "@/lib/survey-questions";
 
@@ -69,6 +71,7 @@ export function CommandCenter() {
     brandColor,
     customVisits,
     onboardedCandidates,
+    candidateLoginAccounts,
     deletedCandidateNames,
     candidateStatuses,
     passwordEvents,
@@ -99,6 +102,7 @@ export function CommandCenter() {
     updateSocialHandle,
     addFieldAgent,
     updateFieldAgent,
+    deleteFieldAgent,
     addStaffMember,
     updateStaffAccess,
     addResourceAllocation,
@@ -107,6 +111,23 @@ export function CommandCenter() {
     publishMessage,
     sendAfricaTalkingMessage
   } = useOpsStore();
+  const [surveyResponses, setSurveyResponses] = useState<SurveyResponse[]>([]);
+  useEffect(() => {
+    function loadSurveyResponses() {
+      const responses = commandData.surveys.flatMap((survey) => {
+        const saved = window.localStorage.getItem(storageKeyForSurveyResponses(survey.slug));
+        return saved ? (JSON.parse(saved) as SurveyResponse[]) : [];
+      });
+      setSurveyResponses(responses);
+    }
+    loadSurveyResponses();
+    window.addEventListener("storage", loadSurveyResponses);
+    window.addEventListener("pios-survey-response", loadSurveyResponses);
+    return () => {
+      window.removeEventListener("storage", loadSurveyResponses);
+      window.removeEventListener("pios-survey-response", loadSurveyResponses);
+    };
+  }, []);
   const selectedSignals = useMemo(
     () =>
       commandData.posts.filter((signal) => signal.region.name === selectedRegion.name).length +
@@ -125,6 +146,7 @@ export function CommandCenter() {
     { label: "Climate risk index", value: "Medium", change: -3, tone: "neutral" }
   ];
   const visibleMetrics = workspaceRole === "creator" ? creatorClimateMetrics : workspaceRole === "clerk" ? commandData.metrics.slice(1, 3) : commandData.metrics;
+  const candidateMetrics = workspaceRole === "creator" ? visibleMetrics : visibleMetrics.map((metric) => (metric.label === "Positive field signals" ? { ...metric, value: String(Number(metric.value) + surveyResponses.length) } : metric));
   const headerTitle = workspaceRole === "creator" ? "House Aurelius PIOS" : candidateName;
   const headerSubtitle =
     workspaceRole === "creator"
@@ -178,7 +200,7 @@ export function CommandCenter() {
         <ModuleNav activeModule={activeModule} setActiveModule={setActiveModule} workspaceRole={workspaceRole} />
 
         <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {visibleMetrics.map((metric) => (
+          {candidateMetrics.map((metric) => (
             <div key={metric.label} className="rounded-md border border-white/10 bg-white/[.045] p-4 shadow-intel">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-sm text-slate-400">{metric.label}</p>
@@ -213,17 +235,18 @@ export function CommandCenter() {
             fieldAgents={fieldAgents}
             addFieldAgent={addFieldAgent}
             updateFieldAgent={updateFieldAgent}
+            deleteFieldAgent={deleteFieldAgent}
           />
         ) : null}
         {activeModule === "social" ? (
           <SocialModule publishedMessages={publishedMessages} publishMessage={publishMessage} />
         ) : null}
         {activeModule === "ai" ? (
-          <AiModule generatedBriefing={generatedBriefing} generateBriefing={generateBriefing} />
+          <AiModule generatedBriefing={generatedBriefing} generateBriefing={generateBriefing} surveyResponses={surveyResponses} />
         ) : null}
         {activeModule === "crm" ? <CrmModule /> : null}
-        {activeModule === "surveys" ? <SurveyModule /> : null}
-        {activeModule === "alerts" ? <AlertsModule /> : null}
+        {activeModule === "surveys" ? <SurveyModule surveyResponses={surveyResponses} /> : null}
+        {activeModule === "alerts" ? <AlertsModule surveyResponses={surveyResponses} /> : null}
         {activeModule === "deployment" ? (
           <DeploymentModule
             resourceAllocations={resourceAllocations}
@@ -241,6 +264,7 @@ export function CommandCenter() {
           <CreatorModule
             addCandidate={addCandidate}
             onboardedCandidates={onboardedCandidates}
+            candidateLoginAccounts={candidateLoginAccounts}
             deletedCandidateNames={deletedCandidateNames}
             candidateStatuses={candidateStatuses}
             passwordEvents={passwordEvents}
@@ -267,7 +291,12 @@ export function CommandCenter() {
           />
         ) : null}
         {activeModule === "comms" ? (
-          <CommunicationsModule sentMessages={sentMessages} sendAfricaTalkingMessage={sendAfricaTalkingMessage} />
+          <CommunicationsModule
+            sentMessages={sentMessages}
+            sendAfricaTalkingMessage={sendAfricaTalkingMessage}
+            fieldAgents={fieldAgents}
+            staffMembers={staffMembers}
+          />
         ) : null}
         {activeModule === "customize" ? (
           <CustomizeModule
@@ -605,13 +634,15 @@ function FieldModule({
   addFieldDraft,
   fieldAgents,
   addFieldAgent,
-  updateFieldAgent
+  updateFieldAgent,
+  deleteFieldAgent
 }: {
   fieldDrafts: Array<{ title: string; region: string; type: string }>;
   addFieldDraft: (draft: { title: string; region: string; type: string }) => void;
   fieldAgents: Array<{ name: string; phone: string; pollingStation: string; ward: string; status: string }>;
   addFieldAgent: (agent: { name: string; phone: string; pollingStation: string; ward: string; status: string }) => void;
   updateFieldAgent: (phone: string, patch: Partial<{ name: string; phone: string; pollingStation: string; ward: string; status: string }>) => void;
+  deleteFieldAgent: (phone: string) => void;
 }) {
   const [title, setTitle] = useState("Polling station queue irregularity");
   const [region, setRegion] = useState("Nairobi West");
@@ -674,9 +705,14 @@ function FieldModule({
                 <p className="mt-2 text-sm text-sky-100">{agent.phone}</p>
                 <p className="mt-3 text-sm leading-6 text-slate-300">{agent.pollingStation}</p>
                 <p className="text-xs text-slate-500">{agent.ward}</p>
-                <button onClick={() => updateFieldAgent(agent.phone, { status: agent.status === "Active" ? "Inactive" : "Active" })} className="mt-3 rounded-md border border-white/10 px-2 py-1 text-xs text-slate-200">
-                  Toggle status
-                </button>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button onClick={() => updateFieldAgent(agent.phone, { status: agent.status === "Active" ? "Inactive" : "Active" })} className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-200">
+                    Toggle status
+                  </button>
+                  <button onClick={() => deleteFieldAgent(agent.phone)} className="rounded-md border border-rose-300/40 px-2 py-1 text-xs font-semibold text-rose-100">
+                    Delete
+                  </button>
+                </div>
               </article>
             ))}
           </div>
@@ -746,11 +782,14 @@ function SocialModule({
 
 function AiModule({
   generatedBriefing,
-  generateBriefing
+  generateBriefing,
+  surveyResponses
 }: {
   generatedBriefing: string;
   generateBriefing: () => void;
+  surveyResponses: SurveyResponse[];
 }) {
+  const latestSurvey = surveyResponses[0];
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.9fr_1.1fr]">
       <Panel title="Strategic Advisor" icon={<BrainCircuit size={20} />}>
@@ -758,6 +797,11 @@ function AiModule({
         <div className="rounded-md border border-sky-300/20 bg-sky-300/10 p-4 text-sm leading-7 text-sky-50">
           {generatedBriefing || "Click generate to simulate the AI briefing workflow. The FastAPI service also exposes /analyze/signals and /briefings/executive for live model-backed use."}
         </div>
+        {latestSurvey ? (
+          <div className="mt-4 rounded-md border border-emerald-300/20 bg-emerald-300/10 p-4 text-sm leading-7 text-emerald-50">
+            Survey signal loaded: {surveyResponses.length} public responses available for issue clustering, support scoring, and regional insight generation. Latest response came from {String(latestSurvey.answers.location ?? "an unknown location")}.
+          </div>
+        ) : null}
       </Panel>
       <Panel title="Recommendation Queue" icon={<CircleDot size={20} />}>
         <div className="space-y-3">
@@ -767,6 +811,14 @@ function AiModule({
               <p className="mt-2 text-sm leading-6 text-slate-300">{insight.recommendation}</p>
             </article>
           ))}
+          {surveyResponses.length ? (
+            <article className="rounded-md border border-emerald-300/30 bg-emerald-300/10 p-4">
+              <h3 className="font-semibold text-white">Survey-driven insight</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-200">
+                {surveyResponses.length} submitted field responses are now feeding dashboard metrics. Prioritize wards with repeated cost-of-living or undecided-voter answers.
+              </p>
+            </article>
+          ) : null}
         </div>
       </Panel>
     </section>
@@ -790,7 +842,7 @@ function CrmModule() {
   );
 }
 
-function SurveyModule() {
+function SurveyModule({ surveyResponses }: { surveyResponses: SurveyResponse[] }) {
   const [baseUrl, setBaseUrl] = useState("http://localhost:3000/survey");
   const [selectedSlug, setSelectedSlug] = useState(commandData.surveys[0].slug);
   const [questions, setQuestions] = useState<SurveyQuestion[]>(defaultSurveyQuestions[selectedSlug]);
@@ -845,6 +897,7 @@ function SurveyModule() {
       return next;
     });
   }
+  const selectedResponses = surveyResponses.filter((response) => response.slug === selectedSlug);
 
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.95fr_1.05fr]">
@@ -879,6 +932,15 @@ function SurveyModule() {
         <div className="mb-4 rounded-md border border-sky-300/20 bg-sky-300/10 p-3 text-sm leading-6 text-sky-50">
           Editing questions here changes the public survey form in this browser. In production, these edits would save through the survey API and generate a permanent QR link.
         </div>
+        <div className="mb-4 grid gap-3 sm:grid-cols-2">
+          <MetricMini label="Submitted responses" value={String(selectedResponses.length)} />
+          <MetricMini label="AI-ready signals" value={String(surveyResponses.length)} />
+        </div>
+        {selectedResponses[0] ? (
+          <div className="mb-4 rounded-md border border-emerald-300/20 bg-emerald-300/10 p-3 text-sm text-emerald-50">
+            Latest: {Object.entries(selectedResponses[0].answers).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(", ") : value}`).join(" / ")}
+          </div>
+        ) : null}
         <div className="space-y-3">
           {questions.map((question) => (
             <article key={question.id} className="rounded-md border border-white/10 bg-white/[.035] p-3">
@@ -928,12 +990,22 @@ function QrPreview({ value }: { value: string }) {
   );
 }
 
-function AlertsModule() {
+function AlertsModule({ surveyResponses }: { surveyResponses: SurveyResponse[] }) {
+  const surveyAlerts = surveyResponses.slice(0, 3).map((response) => ({
+    severity: "HIGH",
+    title: "Fresh survey signal submitted",
+    message: `New public survey response from ${String(response.answers.location ?? "unknown location")} is ready for AI triage and dashboard scoring.`,
+    region: { name: String(response.answers.location ?? "Survey") }
+  }));
+  const alerts = [...surveyAlerts, ...commandData.alerts];
   return (
     <Panel title="Alert Operations" icon={<Siren size={20} />}>
+      <div className="mb-4 rounded-md border border-white/10 bg-white/[.035] p-3 text-sm leading-6 text-slate-300">
+        Alerts are fed by social velocity spikes, field incidents, survey submissions, voter-import anomalies, media negativity, and resource inactivity thresholds.
+      </div>
       <div className="space-y-3">
-        {commandData.alerts.map((alert) => (
-          <article key={alert.title} className={`rounded-md border p-4 ${severityClass(alert.severity)}`}>
+        {alerts.map((alert, index) => (
+          <article key={`${alert.title}-${index}`} className={`rounded-md border p-4 ${severityClass(alert.severity)}`}>
             <div className="flex justify-between text-xs"><span>{alert.severity}</span><span>{alert.region.name}</span></div>
             <h3 className="mt-2 font-semibold text-white">{alert.title}</h3>
             <p className="mt-2 text-sm leading-6 text-slate-200">{alert.message}</p>
@@ -1023,14 +1095,31 @@ function DeploymentModule({
 
 function CommunicationsModule({
   sentMessages,
-  sendAfricaTalkingMessage
+  sendAfricaTalkingMessage,
+  fieldAgents,
+  staffMembers
 }: {
   sentMessages: Array<{ target: string; message: string; channel: string; provider: string }>;
   sendAfricaTalkingMessage: (message: { target: string; message: string; channel: string }) => void;
+  fieldAgents: Array<{ name: string; phone: string; pollingStation: string; ward: string; status: string }>;
+  staffMembers: StaffMember[];
 }) {
   const [target, setTarget] = useState("Nairobi West agents");
   const [channel, setChannel] = useState("SMS");
   const [message, setMessage] = useState("Please submit polling-station updates by 5 PM.");
+  const targetRecipients = useMemo(() => {
+    if (target === "All field agents") return fieldAgents.map((agent) => ({ name: agent.name, phone: agent.phone }));
+    if (target === "All staff") return staffMembers.map((member) => ({ name: member.name, phone: member.phone }));
+    if (target === "Media team") return staffMembers.filter((member) => member.role === "media").map((member) => ({ name: member.name, phone: member.phone }));
+    if (target === "Clerks") return staffMembers.filter((member) => member.role === "clerk").map((member) => ({ name: member.name, phone: member.phone }));
+    return fieldAgents.filter((agent) => agent.ward === "Nairobi West").map((agent) => ({ name: agent.name, phone: agent.phone }));
+  }, [fieldAgents, staffMembers, target]);
+
+  function sendBulkMessage() {
+    targetRecipients.forEach((recipient) => {
+      sendAfricaTalkingMessage({ target: `${recipient.name} ${recipient.phone}`, channel, message });
+    });
+  }
 
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.85fr_1.15fr]">
@@ -1039,7 +1128,8 @@ function CommunicationsModule({
           <select value={target} onChange={(event) => setTarget(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
             <option>Nairobi West agents</option>
             <option>All field agents</option>
-            <option>Media response group</option>
+            <option>All staff</option>
+            <option>Media team</option>
             <option>Clerks</option>
           </select>
           <select value={channel} onChange={(event) => setChannel(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
@@ -1048,8 +1138,11 @@ function CommunicationsModule({
             <option>Voice</option>
           </select>
           <textarea value={message} onChange={(event) => setMessage(event.target.value)} className="min-h-28 w-full rounded-md border border-white/10 bg-slate-950/60 p-3 text-sm text-white outline-none focus:border-sky-300" />
-          <button onClick={() => sendAfricaTalkingMessage({ target, channel, message })} className="h-11 w-full rounded-md bg-sky-300 font-semibold text-slate-950 hover:bg-sky-200">
-            Send via Africa's Talking
+          <div className="rounded-md border border-white/10 bg-white/[.035] p-3 text-sm text-slate-300">
+            {targetRecipients.length} recipients selected for this bulk send.
+          </div>
+          <button onClick={sendBulkMessage} className="h-11 w-full rounded-md bg-sky-300 font-semibold text-slate-950 hover:bg-sky-200">
+            Bulk Send via Africa's Talking
           </button>
         </div>
       </Panel>
@@ -1109,6 +1202,7 @@ function CreatorClimateModule() {
 function CreatorModule({
   addCandidate,
   onboardedCandidates,
+  candidateLoginAccounts,
   deletedCandidateNames,
   candidateStatuses,
   passwordEvents,
@@ -1119,8 +1213,9 @@ function CreatorModule({
   deletePoliticalParty,
   platformParties
 }: {
-  addCandidate: (candidate: { name: string; office: string; party: string; region: string }) => void;
+  addCandidate: (candidate: { name: string; office: string; party: string; region: string; userKey: string; username: string; password: string }) => void;
   onboardedCandidates: Array<{ name: string; office: string; party: string; region: string }>;
+  candidateLoginAccounts: CandidateLoginAccount[];
   deletedCandidateNames: string[];
   candidateStatuses: Record<string, "Active" | "Suspended">;
   passwordEvents: Array<{ actor: string; target: string; changedAt: string }>;
@@ -1135,6 +1230,9 @@ function CreatorModule({
   const [office, setOffice] = useState("Governor");
   const [party, setParty] = useState(platformParties[0]?.abbreviation ?? "");
   const [region, setRegion] = useState("Nairobi County");
+  const [userKey, setUserKey] = useState("CLIENT-2027");
+  const [username, setUsername] = useState("candidate@example.com");
+  const [password, setPassword] = useState("Candidate123!");
   const [partyName, setPartyName] = useState("New Political Party");
   const [partyAbbr, setPartyAbbr] = useState("NPP");
   const candidates = [...onboardedCandidates, ...commandData.candidates.filter((candidate) => !deletedCandidateNames.includes(candidate.name))];
@@ -1151,7 +1249,15 @@ function CreatorModule({
             {platformParties.map((item) => <option key={item.abbreviation} value={item.abbreviation}>{item.name} ({item.abbreviation})</option>)}
           </select>
           <input value={region} onChange={(event) => setRegion(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
-          <button onClick={() => addCandidate({ name, office, party, region })} className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-sky-300 font-semibold text-slate-950 hover:bg-sky-200">
+          <div className="rounded-md border border-sky-300/20 bg-sky-300/10 p-3">
+            <h3 className="text-sm font-semibold text-white">Client login details</h3>
+            <div className="mt-3 grid gap-2">
+              <input value={userKey} onChange={(event) => setUserKey(event.target.value)} placeholder="Client user key" className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+              <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username or email" className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+              <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Temporary password" className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            </div>
+          </div>
+          <button onClick={() => addCandidate({ name, office, party, region, userKey, username, password })} className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-sky-300 font-semibold text-slate-950 hover:bg-sky-200">
             <Plus size={16} />
             Onboard Candidate
           </button>
@@ -1174,6 +1280,11 @@ function CreatorModule({
               </div>
               <h3 className="mt-2 text-lg font-semibold text-white">{candidate.name}</h3>
               <p className="mt-3 text-sm text-sky-100">Party: {candidate.party}</p>
+              {candidateLoginAccounts.find((account) => account.candidateName === candidate.name) ? (
+                <p className="mt-2 text-xs text-slate-400">
+                  Login: {candidateLoginAccounts.find((account) => account.candidateName === candidate.name)?.userKey} / {candidateLoginAccounts.find((account) => account.candidateName === candidate.name)?.username}
+                </p>
+              ) : null}
               <p className="mt-2 text-sm text-slate-400">Workspace, campaign, roles, surveys, and GIS boundaries will be isolated under this tenant candidate record.</p>
               <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
                 <button onClick={() => changePassword(candidate.name)} className="rounded-md border border-sky-300/40 px-2 py-2 text-xs font-semibold text-sky-100">Password</button>

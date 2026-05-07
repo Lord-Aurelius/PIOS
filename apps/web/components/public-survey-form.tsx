@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { commandData } from "@/lib/demo-data";
 import {
   defaultSurveyQuestions,
+  storageKeyForSurveyResponses,
   storageKeyForSurvey,
   SurveyQuestion
 } from "@/lib/survey-questions";
@@ -11,11 +12,34 @@ import {
 export function PublicSurveyForm({ slug }: { slug: string }) {
   const survey = commandData.surveys.find((item) => item.slug === slug) ?? commandData.surveys[0];
   const [questions, setQuestions] = useState<SurveyQuestion[]>(defaultSurveyQuestions[survey.slug]);
+  const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKeyForSurvey(survey.slug));
     setQuestions(saved ? JSON.parse(saved) : defaultSurveyQuestions[survey.slug]);
   }, [survey.slug]);
+
+  function submitSurvey(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const answers = questions.reduce<Record<string, string | string[]>>((result, question) => {
+      const values = data.getAll(question.id).map(String).filter(Boolean);
+      result[question.id] = question.type === "MULTI_CHOICE" ? values : values[0] ?? "";
+      return result;
+    }, {});
+    const storageKey = storageKeyForSurveyResponses(survey.slug);
+    const existing = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]");
+    const response = {
+      id: `response-${Date.now()}`,
+      slug: survey.slug,
+      submittedAt: new Date().toISOString(),
+      answers
+    };
+    window.localStorage.setItem(storageKey, JSON.stringify([response, ...existing]));
+    window.dispatchEvent(new CustomEvent("pios-survey-response", { detail: response }));
+    setSubmitted(true);
+    event.currentTarget.reset();
+  }
 
   return (
     <main className="min-h-screen bg-command-950 px-4 py-6 text-white">
@@ -25,13 +49,18 @@ export function PublicSurveyForm({ slug }: { slug: string }) {
           <h1 className="mt-2 text-2xl font-semibold">{survey.name}</h1>
           <p className="mt-2 text-sm leading-6 text-slate-400">{survey.target}</p>
         </div>
-        <form className="space-y-5 p-5">
+        <form onSubmit={submitSurvey} className="space-y-5 p-5">
           {questions.map((question) => (
             <Field key={question.id} label={question.label}>
               <QuestionInput question={question} />
             </Field>
           ))}
-          <button className="h-12 w-full rounded-md bg-sky-300 font-semibold text-slate-950" type="button">
+          {submitted ? (
+            <p className="rounded-md border border-emerald-300/30 bg-emerald-300/10 p-3 text-sm text-emerald-100">
+              Response submitted. The campaign dashboard can now use this field signal.
+            </p>
+          ) : null}
+          <button className="h-12 w-full rounded-md bg-sky-300 font-semibold text-slate-950" type="submit">
             Submit Response
           </button>
           <p className="text-xs leading-5 text-slate-500">
