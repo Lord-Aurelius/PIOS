@@ -71,6 +71,11 @@ export function CommandCenter() {
     onboardedCandidates,
     candidateStatuses,
     passwordEvents,
+    staffPasswords,
+    socialHandles,
+    fieldAgents,
+    resourceAllocations,
+    platformParties,
     publishedMessages,
     sentMessages,
     login,
@@ -87,6 +92,13 @@ export function CommandCenter() {
     changePassword,
     suspendCandidate,
     deleteCandidate,
+    setStaffPassword,
+    addSocialHandle,
+    updateSocialHandle,
+    addFieldAgent,
+    updateFieldAgent,
+    addResourceAllocation,
+    addPoliticalParty,
     publishMessage,
     sendAfricaTalkingMessage
   } = useOpsStore();
@@ -101,7 +113,20 @@ export function CommandCenter() {
     return <LoginScreen login={login} loginError={loginError} />;
   }
 
-  const visibleMetrics = workspaceRole === "clerk" ? commandData.metrics.slice(1, 3) : commandData.metrics;
+  const creatorClimateMetrics = [
+    { label: "Tracked candidates", value: String([...onboardedCandidates, ...commandData.candidates].length), change: 12, tone: "positive" },
+    { label: "Regions monitored", value: String(commandData.regions.length), change: 4, tone: "neutral" },
+    { label: "Platform access users", value: String(commandData.candidateAccounts.length + [...onboardedCandidates, ...commandData.candidates].length), change: 9, tone: "positive" },
+    { label: "Climate risk index", value: "Medium", change: -3, tone: "neutral" }
+  ];
+  const visibleMetrics = workspaceRole === "creator" ? creatorClimateMetrics : workspaceRole === "clerk" ? commandData.metrics.slice(1, 3) : commandData.metrics;
+  const headerTitle = workspaceRole === "creator" ? "House Aurelius PIOS" : candidateName;
+  const headerSubtitle =
+    workspaceRole === "creator"
+      ? "Creator administration for candidate tenants, access, usage, and political climate monitoring"
+      : campaignSlogan;
+  const headerContext = workspaceRole === "creator" ? "House Aurelius Creator Console" : `${workspaceRole} workspace`;
+  const workspaceSwitcherLabel = workspaceRole === "creator" ? "House Aurelius Platform" : campaignName;
 
   return (
     <main className="min-h-screen">
@@ -113,17 +138,17 @@ export function CommandCenter() {
             </div>
             <div>
               <p className="text-sm font-medium uppercase text-sky-200/80">
-                {workspaceRole === "creator" ? "Creator Console" : `${workspaceRole} workspace`}
+                {headerContext}
               </p>
               <h1 className="text-2xl font-semibold tracking-normal text-white sm:text-3xl">
-                {candidateName}
+                {headerTitle}
               </h1>
-              <p className="mt-1 text-sm text-slate-400">{campaignSlogan}</p>
+              <p className="mt-1 text-sm text-slate-400">{headerSubtitle}</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-sm text-slate-300">
             <button className="flex h-10 items-center gap-2 rounded-md border border-white/10 bg-white/[.04] px-3 hover:bg-white/[.08]">
-              {campaignName}
+              {workspaceSwitcherLabel}
               <ChevronDown size={16} />
             </button>
             <button className="flex h-10 items-center gap-2 rounded-md px-3 font-semibold text-slate-950 hover:brightness-110" style={{ background: brandColor }}>
@@ -137,7 +162,12 @@ export function CommandCenter() {
           </div>
         </header>
         <div className="rounded-md border border-white/10 bg-white/[.035] px-3 py-2 text-sm text-slate-300">
-          Signed in as <span className="font-semibold text-white">{activeIdentity}</span>. Candidate staff access is tied to user key <span className="font-semibold text-sky-100">AMINA-2027</span>.
+          Signed in as <span className="font-semibold text-white">{activeIdentity}</span>.
+          {workspaceRole === "creator" ? (
+            <> This is the House Aurelius platform administration workspace.</>
+          ) : (
+            <> Candidate staff access is tied to user key <span className="font-semibold text-sky-100">AMINA-2027</span>.</>
+          )}
         </div>
 
         <ModuleNav activeModule={activeModule} setActiveModule={setActiveModule} workspaceRole={workspaceRole} />
@@ -160,7 +190,8 @@ export function CommandCenter() {
           ))}
         </section>
 
-        {activeModule === "command" ? (
+        {activeModule === "command" && workspaceRole === "creator" ? <CreatorClimateModule /> : null}
+        {activeModule === "command" && workspaceRole !== "creator" ? (
           <CommandModule
             selectedRegion={selectedRegion}
             selectedSignals={selectedSignals}
@@ -170,7 +201,15 @@ export function CommandCenter() {
           />
         ) : null}
 
-        {activeModule === "field" ? <FieldModule addFieldDraft={addFieldDraft} fieldDrafts={fieldDrafts} /> : null}
+        {activeModule === "field" ? (
+          <FieldModule
+            addFieldDraft={addFieldDraft}
+            fieldDrafts={fieldDrafts}
+            fieldAgents={fieldAgents}
+            addFieldAgent={addFieldAgent}
+            updateFieldAgent={updateFieldAgent}
+          />
+        ) : null}
         {activeModule === "social" ? (
           <SocialModule publishedMessages={publishedMessages} publishMessage={publishMessage} />
         ) : null}
@@ -180,12 +219,14 @@ export function CommandCenter() {
         {activeModule === "crm" ? <CrmModule /> : null}
         {activeModule === "surveys" ? <SurveyModule /> : null}
         {activeModule === "alerts" ? <AlertsModule /> : null}
-        {activeModule === "deployment" ? <DeploymentModule /> : null}
+        {activeModule === "deployment" ? (
+          <DeploymentModule resourceAllocations={resourceAllocations} addResourceAllocation={addResourceAllocation} />
+        ) : null}
         {activeModule === "voters" ? (
           <VoterImportModule uploadedVoterFile={uploadedVoterFile} setUploadedVoterFile={setUploadedVoterFile} />
         ) : null}
         {activeModule === "party" ? (
-          <PartyModule selectedParty={selectedParty} setSelectedParty={setSelectedParty} />
+          <PartyModule selectedParty={selectedParty} setSelectedParty={setSelectedParty} platformParties={platformParties} />
         ) : null}
         {activeModule === "creator" ? (
           <CreatorModule
@@ -196,10 +237,20 @@ export function CommandCenter() {
             changePassword={changePassword}
             suspendCandidate={suspendCandidate}
             deleteCandidate={deleteCandidate}
+            addPoliticalParty={addPoliticalParty}
+            platformParties={platformParties}
           />
         ) : null}
         {activeModule === "access" ? (
-          <AccessModule changePassword={changePassword} passwordEvents={passwordEvents} />
+          <AccessModule
+            changePassword={changePassword}
+            passwordEvents={passwordEvents}
+            staffPasswords={staffPasswords}
+            setStaffPassword={setStaffPassword}
+            socialHandles={socialHandles}
+            addSocialHandle={addSocialHandle}
+            updateSocialHandle={updateSocialHandle}
+          />
         ) : null}
         {activeModule === "comms" ? (
           <CommunicationsModule sentMessages={sentMessages} sendAfricaTalkingMessage={sendAfricaTalkingMessage} />
@@ -242,14 +293,14 @@ function LoginScreen({
             <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-md border border-sky-300/40 bg-sky-300/10 text-sky-200">
               <ShieldCheck />
             </div>
-            <p className="text-sm uppercase text-sky-200">Political Intelligence OS</p>
-            <h1 className="mt-3 text-4xl font-semibold text-white">Secure campaign login</h1>
+            <p className="text-sm uppercase text-sky-200">House Aurelius</p>
+            <h1 className="mt-3 text-4xl font-semibold text-white">PIOS secure login</h1>
             <p className="mt-4 max-w-xl text-sm leading-7 text-slate-300">
-              A single secure portal routes creator, candidate, and candidate-staff accounts into the correct workspace.
+              A House Aurelius product for political intelligence, candidate operations, and campaign command.
             </p>
           </div>
           <div className="rounded-md border border-sky-300/20 bg-sky-300/10 p-4 text-sm leading-6 text-sky-50">
-            Creator accounts onboard and control candidates. Candidate staff accounts are tied to a candidate user key and have scoped module access.
+            One secure portal routes creator, candidate, and candidate-staff accounts into the correct workspace. Candidate staff accounts are tied to a candidate user key and have scoped module access.
           </div>
         </div>
         <div className="rounded-md border border-white/10 bg-command-900/90 p-6 shadow-intel">
@@ -537,14 +588,23 @@ function CommandModule({
 
 function FieldModule({
   fieldDrafts,
-  addFieldDraft
+  addFieldDraft,
+  fieldAgents,
+  addFieldAgent,
+  updateFieldAgent
 }: {
   fieldDrafts: Array<{ title: string; region: string; type: string }>;
   addFieldDraft: (draft: { title: string; region: string; type: string }) => void;
+  fieldAgents: Array<{ name: string; phone: string; pollingStation: string; ward: string; status: string }>;
+  addFieldAgent: (agent: { name: string; phone: string; pollingStation: string; ward: string; status: string }) => void;
+  updateFieldAgent: (phone: string, patch: Partial<{ name: string; phone: string; pollingStation: string; ward: string; status: string }>) => void;
 }) {
   const [title, setTitle] = useState("Polling station queue irregularity");
   const [region, setRegion] = useState("Nairobi West");
   const [type, setType] = useState("POLLING_STATION");
+  const [agentName, setAgentName] = useState("New Agent");
+  const [agentPhone, setAgentPhone] = useState("+254700000000");
+  const [agentStation, setAgentStation] = useState("Polling station name");
 
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.8fr_1.2fr]">
@@ -584,8 +644,14 @@ function FieldModule({
       </Panel>
       <div className="xl:col-span-2">
         <Panel title="Clerk Agent Panel" icon={<Users size={20} />}>
+          <div className="mb-4 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]">
+            <input value={agentName} onChange={(event) => setAgentName(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <input value={agentPhone} onChange={(event) => setAgentPhone(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <input value={agentStation} onChange={(event) => setAgentStation(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <button onClick={() => addFieldAgent({ name: agentName, phone: agentPhone, pollingStation: agentStation, ward: region, status: "Active" })} className="h-11 rounded-md bg-sky-300 px-4 font-semibold text-slate-950">Add</button>
+          </div>
           <div className="grid gap-3 md:grid-cols-3">
-            {commandData.fieldAgents.map((agent) => (
+            {fieldAgents.map((agent) => (
               <article key={agent.phone} className="rounded-md border border-white/10 bg-white/[.035] p-4">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="font-semibold text-white">{agent.name}</h3>
@@ -594,6 +660,9 @@ function FieldModule({
                 <p className="mt-2 text-sm text-sky-100">{agent.phone}</p>
                 <p className="mt-3 text-sm leading-6 text-slate-300">{agent.pollingStation}</p>
                 <p className="text-xs text-slate-500">{agent.ward}</p>
+                <button onClick={() => updateFieldAgent(agent.phone, { status: agent.status === "Active" ? "Inactive" : "Active" })} className="mt-3 rounded-md border border-white/10 px-2 py-1 text-xs text-slate-200">
+                  Toggle status
+                </button>
               </article>
             ))}
           </div>
@@ -852,15 +921,33 @@ function AlertsModule() {
   );
 }
 
-function DeploymentModule() {
+function DeploymentModule({
+  resourceAllocations,
+  addResourceAllocation
+}: {
+  resourceAllocations: Array<{ resource: string; region: string; quantity: number; contact: string; status: string }>;
+  addResourceAllocation: (allocation: { resource: string; region: string; quantity: number; contact: string; status: string }) => void;
+}) {
+  const [resource, setResource] = useState("Volunteer kits");
+  const [resourceRegion, setResourceRegion] = useState("Nairobi West");
+  const [quantity, setQuantity] = useState(100);
+  const [contact, setContact] = useState("Grace Atieno");
   return (
     <Panel title="Resource Deployment" icon={<Truck size={20} />}>
+      <div className="mb-4 grid gap-2 md:grid-cols-[1fr_1fr_120px_1fr_auto]">
+        <input value={resource} onChange={(event) => setResource(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+        <input value={resourceRegion} onChange={(event) => setResourceRegion(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+        <input value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} type="number" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+        <input value={contact} onChange={(event) => setContact(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+        <button onClick={() => addResourceAllocation({ resource, region: resourceRegion, quantity, contact, status: "Allocated" })} className="h-11 rounded-md bg-sky-300 px-4 font-semibold text-slate-950">Allocate</button>
+      </div>
       <div className="grid gap-3 md:grid-cols-3">
-        {commandData.deployments.map((deployment) => (
+        {resourceAllocations.map((deployment) => (
           <article key={deployment.resource} className="rounded-md border border-white/10 bg-white/[.035] p-4">
             <p className="text-xs text-slate-400">{deployment.region}</p>
             <h3 className="mt-2 font-semibold text-white">{deployment.resource}</h3>
             <p className="mt-3 text-sm text-slate-300">{deployment.quantity} units / {deployment.status}</p>
+            <p className="mt-2 text-xs text-sky-100">Responsible contact: {deployment.contact}</p>
           </article>
         ))}
       </div>
@@ -918,6 +1005,41 @@ function CommunicationsModule({
   );
 }
 
+function CreatorClimateModule() {
+  return (
+    <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
+      <Panel title="Overall Political Climate" icon={<Activity size={20} />}>
+        <div className="space-y-3">
+          {[
+            ["National mood", "Cost-of-living pressure remains the strongest cross-candidate issue."],
+            ["Regional risk", "Urban constituencies show higher volatility than peri-urban wards."],
+            ["Narrative trend", "Youth jobs and county service delivery are the highest opportunity themes."],
+            ["Platform action", "Review suspended campaigns, party setup, and voter import completeness weekly."]
+          ].map(([label, body]) => (
+            <article key={label} className="rounded-md border border-white/10 bg-white/[.035] p-4">
+              <h3 className="font-semibold text-white">{label}</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-300">{body}</p>
+            </article>
+          ))}
+        </div>
+      </Panel>
+      <Panel title="Candidate Portfolio Climate" icon={<Users size={20} />}>
+        <div className="space-y-3">
+          {commandData.candidates.map((candidate) => (
+            <article key={candidate.name} className="rounded-md border border-white/10 bg-white/[.035] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="font-semibold text-white">{candidate.name}</h3>
+                <span className="text-xs text-sky-100">{candidate.office}</span>
+              </div>
+              <p className="mt-2 text-sm text-slate-300">{candidate.region} / {candidate.party}</p>
+            </article>
+          ))}
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
 function CreatorModule({
   addCandidate,
   onboardedCandidates,
@@ -925,7 +1047,9 @@ function CreatorModule({
   passwordEvents,
   changePassword,
   suspendCandidate,
-  deleteCandidate
+  deleteCandidate,
+  addPoliticalParty,
+  platformParties
 }: {
   addCandidate: (candidate: { name: string; office: string; party: string; region: string }) => void;
   onboardedCandidates: Array<{ name: string; office: string; party: string; region: string }>;
@@ -934,11 +1058,15 @@ function CreatorModule({
   changePassword: (target: string) => void;
   suspendCandidate: (name: string) => void;
   deleteCandidate: (name: string) => void;
+  addPoliticalParty: (party: { name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }) => void;
+  platformParties: Array<{ name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }>;
 }) {
   const [name, setName] = useState("New Candidate");
   const [office, setOffice] = useState("Governor");
   const [party, setParty] = useState(commandData.parties[0].abbreviation);
   const [region, setRegion] = useState("Nairobi County");
+  const [partyName, setPartyName] = useState("New Political Party");
+  const [partyAbbr, setPartyAbbr] = useState("NPP");
   const candidates = [...onboardedCandidates, ...commandData.candidates];
   const activeCandidateCount = candidates.filter((candidate) => candidateStatuses[candidate.name] !== "Suspended").length;
   const accessCount = commandData.candidateAccounts.length + activeCandidateCount;
@@ -1005,17 +1133,50 @@ function CreatorModule({
           </div>
         </Panel>
       </div>
+      <div className="xl:col-span-2">
+        <Panel title="Political Party Setup" icon={<Landmark size={20} />}>
+          <div className="mb-4 grid gap-2 md:grid-cols-[1fr_120px_auto]">
+            <input value={partyName} onChange={(event) => setPartyName(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <input value={partyAbbr} onChange={(event) => setPartyAbbr(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <button onClick={() => addPoliticalParty({ name: partyName, abbreviation: partyAbbr, color: "#38bdf8", ideology: "Configured by creator", influenceScore: 50, sentimentScore: 0, strongholds: [], risks: [] })} className="h-11 rounded-md bg-sky-300 px-4 font-semibold text-slate-950">
+              Add Party
+            </button>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {platformParties.map((party) => (
+              <article key={party.abbreviation} className="rounded-md border border-white/10 bg-white/[.035] p-4">
+                <p className="text-xs text-slate-400">{party.abbreviation}</p>
+                <h3 className="mt-2 font-semibold text-white">{party.name}</h3>
+                <p className="mt-2 text-sm text-slate-300">{party.ideology}</p>
+              </article>
+            ))}
+          </div>
+        </Panel>
+      </div>
     </section>
   );
 }
 
 function AccessModule({
   changePassword,
-  passwordEvents
+  passwordEvents,
+  staffPasswords,
+  setStaffPassword,
+  socialHandles,
+  addSocialHandle,
+  updateSocialHandle
 }: {
   changePassword: (target: string) => void;
   passwordEvents: Array<{ actor: string; target: string; changedAt: string }>;
+  staffPasswords: Record<string, string>;
+  setStaffPassword: (username: string, password: string) => void;
+  socialHandles: Array<{ network: string; handle: string; status: string; risk: string }>;
+  addSocialHandle: (handle: { network: string; handle: string; status: string; risk: string }) => void;
+  updateSocialHandle: (network: string, handle: string) => void;
 }) {
+  const [passwordDrafts, setPasswordDrafts] = useState<Record<string, string>>({});
+  const [network, setNetwork] = useState("Instagram");
+  const [handle, setHandle] = useState("@aminaofficial");
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
       <Panel title="Staff Access Control" icon={<Users size={20} />}>
@@ -1038,10 +1199,13 @@ function AccessModule({
             <h3 className="font-semibold text-white">Password control</h3>
             <div className="mt-3 grid gap-2">
               {commandData.candidateAccounts.map((account) => (
-                <button key={account.username} onClick={() => changePassword(account.username)} className="flex items-center justify-between rounded-md border border-white/10 bg-slate-950/40 px-3 py-2 text-left text-sm text-slate-200">
-                  <span>{account.role}: {account.username}</span>
-                  <span className="text-sky-100">Reset</span>
-                </button>
+                <div key={account.username} className="rounded-md border border-white/10 bg-slate-950/40 p-3">
+                  <p className="text-sm font-semibold text-white">{account.role}: {account.username}</p>
+                  <input value={passwordDrafts[account.username] ?? ""} onChange={(event) => setPasswordDrafts({ ...passwordDrafts, [account.username]: event.target.value })} placeholder={staffPasswords[account.username] ?? "New password"} className="mt-2 h-10 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+                  <button onClick={() => setStaffPassword(account.username, passwordDrafts[account.username] || "ManualPassword123!")} className="mt-2 rounded-md border border-sky-300/40 px-2 py-1 text-xs font-semibold text-sky-100">
+                    Set specific password
+                  </button>
+                </div>
               ))}
             </div>
             {passwordEvents.length ? (
@@ -1052,14 +1216,19 @@ function AccessModule({
       </Panel>
       <Panel title="Connected Social Handles" icon={<Megaphone size={20} />}>
         <div className="space-y-3">
-          {commandData.socialHandles.map((handle) => (
-            <article key={handle.handle} className="rounded-md border border-white/10 bg-white/[.035] p-4">
+          <div className="mb-4 grid gap-2 md:grid-cols-[120px_1fr_auto]">
+            <input value={network} onChange={(event) => setNetwork(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <input value={handle} onChange={(event) => setHandle(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <button onClick={() => addSocialHandle({ network, handle, status: "Connected", risk: "Manual handle added" })} className="h-11 rounded-md bg-sky-300 px-3 font-semibold text-slate-950">Add</button>
+          </div>
+          {socialHandles.map((social) => (
+            <article key={social.network} className="rounded-md border border-white/10 bg-white/[.035] p-4">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="font-semibold text-white">{handle.network}</h3>
-                <span className="text-xs text-emerald-200">{handle.status}</span>
+                <h3 className="font-semibold text-white">{social.network}</h3>
+                <span className="text-xs text-emerald-200">{social.status}</span>
               </div>
-              <p className="mt-2 text-sm text-sky-100">{handle.handle}</p>
-              <p className="mt-3 text-sm leading-6 text-slate-300">{handle.risk}</p>
+              <input value={social.handle} onChange={(event) => updateSocialHandle(social.network, event.target.value)} className="mt-2 h-10 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-sky-100 outline-none focus:border-sky-300" />
+              <p className="mt-3 text-sm leading-6 text-slate-300">{social.risk}</p>
             </article>
           ))}
           <button className="flex h-11 w-full items-center justify-center gap-2 rounded-md border border-sky-300/40 text-sm font-semibold text-sky-100 hover:bg-sky-300/10">
@@ -1172,17 +1341,19 @@ function VoterImportModule({
 
 function PartyModule({
   selectedParty,
-  setSelectedParty
+  setSelectedParty,
+  platformParties
 }: {
   selectedParty: string;
   setSelectedParty: (party: string) => void;
+  platformParties: Array<{ name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }>;
 }) {
-  const party = commandData.parties.find((item) => item.abbreviation === selectedParty) ?? commandData.parties[0];
+  const party = platformParties.find((item) => item.abbreviation === selectedParty) ?? platformParties[0];
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.75fr_1.25fr]">
       <Panel title="Candidate Party Selection" icon={<Landmark size={20} />}>
         <div className="space-y-3">
-          {commandData.parties.map((item) => (
+          {platformParties.map((item) => (
             <button
               key={item.abbreviation}
               onClick={() => setSelectedParty(item.abbreviation)}

@@ -44,6 +44,11 @@ type OpsState = {
   onboardedCandidates: Array<{ name: string; office: string; party: string; region: string }>;
   candidateStatuses: Record<string, "Active" | "Suspended">;
   passwordEvents: Array<{ actor: string; target: string; changedAt: string }>;
+  staffPasswords: Record<string, string>;
+  socialHandles: Array<{ network: string; handle: string; status: string; risk: string }>;
+  fieldAgents: Array<{ name: string; phone: string; pollingStation: string; ward: string; status: string }>;
+  resourceAllocations: Array<{ resource: string; region: string; quantity: number; contact: string; status: string }>;
+  platformParties: Array<{ name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }>;
   publishedMessages: Array<{ message: string; period: string; channels: string[]; asset: string }>;
   sentMessages: Array<{ target: string; message: string; channel: string; provider: string }>;
   login: (credentials: { userKey: string; username: string; password: string }) => LoginResult;
@@ -60,6 +65,13 @@ type OpsState = {
   changePassword: (target: string) => void;
   suspendCandidate: (name: string) => void;
   deleteCandidate: (name: string) => void;
+  setStaffPassword: (username: string, password: string) => void;
+  addSocialHandle: (handle: { network: string; handle: string; status: string; risk: string }) => void;
+  updateSocialHandle: (network: string, handle: string) => void;
+  addFieldAgent: (agent: { name: string; phone: string; pollingStation: string; ward: string; status: string }) => void;
+  updateFieldAgent: (phone: string, patch: Partial<{ name: string; phone: string; pollingStation: string; ward: string; status: string }>) => void;
+  addResourceAllocation: (allocation: { resource: string; region: string; quantity: number; contact: string; status: string }) => void;
+  addPoliticalParty: (party: { name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }) => void;
   publishMessage: (message: { message: string; period: string; channels: string[]; asset: string }) => void;
   sendAfricaTalkingMessage: (message: { target: string; message: string; channel: string }) => void;
 };
@@ -83,6 +95,11 @@ export const useOpsStore = create<OpsState>((set) => ({
   onboardedCandidates: [],
   candidateStatuses: Object.fromEntries(commandData.candidates.map((candidate) => [candidate.name, candidate.status === "Onboarding" ? "Active" : candidate.status])) as Record<string, "Active" | "Suspended">,
   passwordEvents: [],
+  staffPasswords: Object.fromEntries(commandData.candidateAccounts.map((account) => [account.username, "Set by candidate"])),
+  socialHandles: commandData.socialHandles,
+  fieldAgents: commandData.fieldAgents,
+  resourceAllocations: commandData.deployments.map((item) => ({ ...item, contact: "Regional logistics lead" })),
+  platformParties: commandData.parties,
   publishedMessages: [],
   sentMessages: [],
   login: (credentials) => {
@@ -152,6 +169,27 @@ export const useOpsStore = create<OpsState>((set) => ({
       onboardedCandidates: state.onboardedCandidates.filter((candidate) => candidate.name !== name),
       candidateStatuses: { ...state.candidateStatuses, [name]: "Suspended" }
     })),
+  setStaffPassword: (username, password) =>
+    set((state) => ({
+      staffPasswords: { ...state.staffPasswords, [username]: password },
+      passwordEvents: [
+        { actor: state.activeIdentity || "candidate", target: username, changedAt: new Date().toLocaleString() },
+        ...state.passwordEvents
+      ]
+    })),
+  addSocialHandle: (handle) => set((state) => ({ socialHandles: [handle, ...state.socialHandles] })),
+  updateSocialHandle: (network, handle) =>
+    set((state) => ({
+      socialHandles: state.socialHandles.map((item) => (item.network === network ? { ...item, handle } : item))
+    })),
+  addFieldAgent: (agent) => set((state) => ({ fieldAgents: [agent, ...state.fieldAgents] })),
+  updateFieldAgent: (phone, patch) =>
+    set((state) => ({
+      fieldAgents: state.fieldAgents.map((agent) => (agent.phone === phone ? { ...agent, ...patch } : agent))
+    })),
+  addResourceAllocation: (allocation) =>
+    set((state) => ({ resourceAllocations: [allocation, ...state.resourceAllocations] })),
+  addPoliticalParty: (party) => set((state) => ({ platformParties: [party, ...state.platformParties] })),
   publishMessage: (message) => set((state) => ({ publishedMessages: [message, ...state.publishedMessages] })),
   sendAfricaTalkingMessage: (message) =>
     set((state) => ({
