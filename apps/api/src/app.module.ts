@@ -7,6 +7,7 @@ import { GisModule } from "./modules/gis/gis.module";
 import { IntelligenceModule } from "./modules/intelligence/intelligence.module";
 import { PrismaModule } from "./modules/prisma/prisma.module";
 import { SocialModule } from "./modules/social/social.module";
+import { SurveysModule } from "./modules/surveys/surveys.module";
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { SocialModule } from "./modules/social/social.module";
     FieldModule,
     SocialModule,
     GisModule,
+    SurveysModule,
     AlertsModule
   ]
 })

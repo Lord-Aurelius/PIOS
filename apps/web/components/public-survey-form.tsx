@@ -19,7 +19,7 @@ export function PublicSurveyForm({ slug }: { slug: string }) {
     setQuestions(saved ? JSON.parse(saved) : defaultSurveyQuestions[survey.slug]);
   }, [survey.slug]);
 
-  function submitSurvey(event: React.FormEvent<HTMLFormElement>) {
+  async function submitSurvey(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const answers = questions.reduce<Record<string, string | string[]>>((result, question) => {
@@ -27,16 +27,32 @@ export function PublicSurveyForm({ slug }: { slug: string }) {
       result[question.id] = question.type === "MULTI_CHOICE" ? values : values[0] ?? "";
       return result;
     }, {});
-    const storageKey = storageKeyForSurveyResponses(survey.slug);
-    const existing = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]");
     const response = {
       id: `response-${Date.now()}`,
       slug: survey.slug,
       submittedAt: new Date().toISOString(),
       answers
     };
-    window.localStorage.setItem(storageKey, JSON.stringify([response, ...existing]));
-    window.dispatchEvent(new CustomEvent("pios-survey-response", { detail: response }));
+    const apiBase = process.env.NEXT_PUBLIC_API_URL;
+    let savedResponse = response;
+    if (apiBase) {
+      try {
+        const apiResponse = await fetch(`${apiBase}/api/v1/public/surveys/${survey.slug}/responses`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ answers })
+        });
+        if (apiResponse.ok) {
+          savedResponse = await apiResponse.json();
+        }
+      } catch {
+        savedResponse = response;
+      }
+    }
+    const storageKey = storageKeyForSurveyResponses(survey.slug);
+    const existing = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]");
+    window.localStorage.setItem(storageKey, JSON.stringify([savedResponse, ...existing]));
+    window.dispatchEvent(new CustomEvent("pios-survey-response", { detail: savedResponse }));
     setSubmitted(true);
     event.currentTarget.reset();
   }

@@ -113,11 +113,25 @@ export function CommandCenter() {
   } = useOpsStore();
   const [surveyResponses, setSurveyResponses] = useState<SurveyResponse[]>([]);
   useEffect(() => {
-    function loadSurveyResponses() {
+    async function loadSurveyResponses() {
       const responses = commandData.surveys.flatMap((survey) => {
         const saved = window.localStorage.getItem(storageKeyForSurveyResponses(survey.slug));
         return saved ? (JSON.parse(saved) as SurveyResponse[]) : [];
       });
+      const apiBase = process.env.NEXT_PUBLIC_API_URL;
+      if (apiBase) {
+        try {
+          const apiResponse = await fetch(`${apiBase}/api/v1/public/surveys/responses`);
+          if (apiResponse.ok) {
+            const apiResponses = (await apiResponse.json()) as SurveyResponse[];
+            setSurveyResponses([...apiResponses, ...responses]);
+            return;
+          }
+        } catch {
+          setSurveyResponses(responses);
+          return;
+        }
+      }
       setSurveyResponses(responses);
     }
     loadSurveyResponses();
