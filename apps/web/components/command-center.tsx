@@ -389,9 +389,6 @@ function LoginScreen({
               Sign in
             </button>
           </form>
-          <div className="mt-6 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm leading-6 text-amber-50">
-            Credentials are never displayed on this portal. The creator controls candidate and staff access from inside the secured workspace.
-          </div>
         </div>
       </section>
     </main>

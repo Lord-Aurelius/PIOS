@@ -152,7 +152,15 @@ export const useOpsStore = create<OpsState>()(
   brandColor: commandData.parties[0].color,
   customVisits: [],
   onboardedCandidates: [],
-  candidateLoginAccounts: [],
+  candidateLoginAccounts: [
+    {
+      candidateName: commandData.campaign.candidate,
+      userKey: "AMINA-2027",
+      username: "amina",
+      password: "Candidate123!",
+      status: "Active"
+    }
+  ],
   deletedCandidateNames: [],
   candidateStatuses: Object.fromEntries(commandData.candidates.map((candidate) => [candidate.name, candidate.status === "Onboarding" ? "Active" : candidate.status])) as Record<string, "Active" | "Suspended">,
   passwordEvents: [],
@@ -367,7 +375,15 @@ export const useOpsStore = create<OpsState>()(
         publishedMessages: state.publishedMessages,
         sentMessages: state.sentMessages,
         creatorAccount: state.creatorAccount
-      })
+      }),
+      merge: (persistedState, currentState) => {
+        const persisted = persistedState as Partial<OpsState>;
+        const seededCandidate = currentState.candidateLoginAccounts[0];
+        const candidateLoginAccounts = persisted.candidateLoginAccounts?.length
+          ? persisted.candidateLoginAccounts
+          : [seededCandidate];
+        return { ...currentState, ...persisted, candidateLoginAccounts };
+      }
     }
   )
 );
