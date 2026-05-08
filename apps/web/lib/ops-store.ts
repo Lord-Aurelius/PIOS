@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 import { commandData } from "./demo-data";
 
 export type Region = (typeof commandData.regions)[number];
@@ -15,6 +16,7 @@ export type ModuleKey =
   | "voters"
   | "party"
   | "access"
+  | "meetings"
   | "customize"
   | "comms";
 
@@ -45,6 +47,23 @@ export type CandidateLoginAccount = {
   username: string;
   password: string;
   status: "Active" | "Suspended";
+};
+
+export type MeetingAttendee = {
+  name: string;
+  phone: string;
+  location: string;
+  meetingType: string;
+  supportScore: number;
+  x: number;
+  y: number;
+  attendedAt: string;
+};
+
+export type CreatorAccount = {
+  userKey: string;
+  username: string;
+  password: string;
 };
 
 export type LoginResult = {
@@ -78,9 +97,11 @@ type OpsState = {
   fieldAgents: Array<{ name: string; phone: string; pollingStation: string; ward: string; status: string }>;
   staffMembers: StaffMember[];
   resourceAllocations: ResourceAllocation[];
+  meetingAttendees: MeetingAttendee[];
   platformParties: Array<{ name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }>;
   publishedMessages: Array<{ message: string; period: string; channels: string[]; asset: string }>;
   sentMessages: Array<{ target: string; message: string; channel: string; provider: string }>;
+  creatorAccount: CreatorAccount;
   login: (credentials: { userKey: string; username: string; password: string }) => LoginResult;
   logout: () => void;
   setActiveModule: (activeModule: ModuleKey) => void;
@@ -108,9 +129,13 @@ type OpsState = {
   deletePoliticalParty: (abbreviation: string) => void;
   publishMessage: (message: { message: string; period: string; channels: string[]; asset: string }) => void;
   sendAfricaTalkingMessage: (message: { target: string; message: string; channel: string }) => void;
+  updateCreatorAccount: (account: CreatorAccount) => void;
+  addMeetingAttendee: (attendee: Omit<MeetingAttendee, "attendedAt">) => void;
 };
 
-export const useOpsStore = create<OpsState>((set, get) => ({
+export const useOpsStore = create<OpsState>()(
+  persist(
+    (set, get) => ({
   isAuthenticated: false,
   workspaceRole: "candidate",
   activeIdentity: "",
@@ -146,16 +171,17 @@ export const useOpsStore = create<OpsState>((set, get) => ({
     recipientPhone: ["+254711000101", "+254711222333", "+254722000202"][index] ?? "+254700000000",
     location: item.region
   })),
+  meetingAttendees: [],
   platformParties: commandData.parties,
   publishedMessages: [],
   sentMessages: [],
+  creatorAccount: { userKey: "CREATOR-HQ", username: "creator@pios.local", password: "Creator123!" },
   login: (credentials) => {
-    const demoAccount = commandData.demoAccounts.find(
-      (item) =>
-        item.userKey.toLowerCase() === credentials.userKey.trim().toLowerCase() &&
-        item.username.toLowerCase() === credentials.username.trim().toLowerCase() &&
-        item.password === credentials.password
-    );
+    const creatorAccount = get().creatorAccount;
+    const creatorMatch =
+      creatorAccount.userKey.toLowerCase() === credentials.userKey.trim().toLowerCase() &&
+      creatorAccount.username.toLowerCase() === credentials.username.trim().toLowerCase() &&
+      creatorAccount.password === credentials.password;
     const candidateAccount = get().candidateLoginAccounts.find(
       (item) =>
         item.status === "Active" &&
@@ -170,7 +196,9 @@ export const useOpsStore = create<OpsState>((set, get) => ({
         item.email.toLowerCase() === credentials.username.trim().toLowerCase() &&
         get().staffPasswords[item.email] === credentials.password
     );
-    const account = demoAccount ?? (candidateAccount ? { username: candidateAccount.username, role: "candidate" } : undefined) ?? (staffAccount ? { username: staffAccount.email, role: staffAccount.role } : undefined);
+    const account = creatorMatch
+      ? { username: creatorAccount.username, role: "creator" }
+      : (candidateAccount ? { username: candidateAccount.username, role: "candidate" } : undefined) ?? (staffAccount ? { username: staffAccount.email, role: staffAccount.role } : undefined);
     if (!account) {
       set({ loginError: "Invalid user key, username, or password." });
       return { ok: false, message: "Invalid user key, username, or password." };
@@ -291,5 +319,55 @@ export const useOpsStore = create<OpsState>((set, get) => ({
         { ...message, provider: "Africa's Talking" },
         ...state.sentMessages
       ]
+    })),
+  updateCreatorAccount: (account) =>
+    set((state) => ({
+      creatorAccount: account,
+      activeIdentity: state.workspaceRole === "creator" ? account.username : state.activeIdentity,
+      passwordEvents: [
+        { actor: state.activeIdentity || "creator", target: "creator account", changedAt: new Date().toLocaleString() },
+        ...state.passwordEvents
+      ]
+    })),
+  addMeetingAttendee: (attendee) =>
+    set((state) => ({
+      meetingAttendees: [
+        { ...attendee, attendedAt: new Date().toISOString() },
+        ...state.meetingAttendees
+      ]
     }))
-}));
+    }),
+    {
+      name: "pios-ops-state",
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        isAuthenticated: state.isAuthenticated,
+        workspaceRole: state.workspaceRole,
+        activeIdentity: state.activeIdentity,
+        activeModule: state.activeModule,
+        selectedParty: state.selectedParty,
+        uploadedVoterFile: state.uploadedVoterFile,
+        campaignName: state.campaignName,
+        candidateName: state.candidateName,
+        campaignSlogan: state.campaignSlogan,
+        brandColor: state.brandColor,
+        customVisits: state.customVisits,
+        onboardedCandidates: state.onboardedCandidates,
+        candidateLoginAccounts: state.candidateLoginAccounts,
+        deletedCandidateNames: state.deletedCandidateNames,
+        candidateStatuses: state.candidateStatuses,
+        passwordEvents: state.passwordEvents,
+        staffPasswords: state.staffPasswords,
+        socialHandles: state.socialHandles,
+        fieldAgents: state.fieldAgents,
+        staffMembers: state.staffMembers,
+        resourceAllocations: state.resourceAllocations,
+        meetingAttendees: state.meetingAttendees,
+        platformParties: state.platformParties,
+        publishedMessages: state.publishedMessages,
+        sentMessages: state.sentMessages,
+        creatorAccount: state.creatorAccount
+      })
+    }
+  )
+);

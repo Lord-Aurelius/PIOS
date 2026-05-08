@@ -29,7 +29,7 @@ import {
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { commandData } from "@/lib/demo-data";
-import { CandidateLoginAccount, ModuleKey, ResourceAllocation, StaffMember, useOpsStore, WorkspaceRole } from "@/lib/ops-store";
+import { CandidateLoginAccount, CreatorAccount, MeetingAttendee, ModuleKey, ResourceAllocation, StaffMember, useOpsStore, WorkspaceRole } from "@/lib/ops-store";
 import {
   defaultSurveyQuestions,
   questionTypes,
@@ -80,9 +80,11 @@ export function CommandCenter() {
     fieldAgents,
     staffMembers,
     resourceAllocations,
+    meetingAttendees,
     platformParties,
     publishedMessages,
     sentMessages,
+    creatorAccount,
     login,
     logout,
     setActiveModule,
@@ -109,7 +111,9 @@ export function CommandCenter() {
     addPoliticalParty,
     deletePoliticalParty,
     publishMessage,
-    sendAfricaTalkingMessage
+    sendAfricaTalkingMessage,
+    updateCreatorAccount,
+    addMeetingAttendee
   } = useOpsStore();
   const [surveyResponses, setSurveyResponses] = useState<SurveyResponse[]>([]);
   useEffect(() => {
@@ -238,6 +242,7 @@ export function CommandCenter() {
             selectedSignals={selectedSignals}
             setSelectedRegion={setSelectedRegion}
             customVisits={customVisits}
+            meetingAttendees={meetingAttendees}
             addVisitToSelectedRegion={addVisitToSelectedRegion}
           />
         ) : null}
@@ -288,6 +293,8 @@ export function CommandCenter() {
             addPoliticalParty={addPoliticalParty}
             deletePoliticalParty={deletePoliticalParty}
             platformParties={platformParties}
+            creatorAccount={creatorAccount}
+            updateCreatorAccount={updateCreatorAccount}
           />
         ) : null}
         {activeModule === "access" ? (
@@ -304,12 +311,20 @@ export function CommandCenter() {
             updateStaffAccess={updateStaffAccess}
           />
         ) : null}
+        {activeModule === "meetings" ? (
+          <MeetingsModule
+            meetingAttendees={meetingAttendees}
+            addMeetingAttendee={addMeetingAttendee}
+            sendAfricaTalkingMessage={sendAfricaTalkingMessage}
+          />
+        ) : null}
         {activeModule === "comms" ? (
           <CommunicationsModule
             sentMessages={sentMessages}
             sendAfricaTalkingMessage={sendAfricaTalkingMessage}
             fieldAgents={fieldAgents}
             staffMembers={staffMembers}
+            meetingAttendees={meetingAttendees}
           />
         ) : null}
         {activeModule === "customize" ? (
@@ -333,9 +348,9 @@ function LoginScreen({
   login: (credentials: { userKey: string; username: string; password: string }) => { ok: boolean; message: string };
   loginError: string;
 }) {
-  const [userKey, setUserKey] = useState("CREATOR-HQ");
-  const [username, setUsername] = useState("creator@pios.local");
-  const [password, setPassword] = useState("Creator123!");
+  const [userKey, setUserKey] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
 
   function submitLogin(event: React.FormEvent) {
     event.preventDefault();
@@ -374,22 +389,8 @@ function LoginScreen({
               Sign in
             </button>
           </form>
-          <div className="mt-6 grid gap-2">
-            {commandData.demoAccounts.map((account) => (
-              <button
-                key={`${account.userKey}-${account.username}`}
-                type="button"
-                onClick={() => {
-                  setUserKey(account.userKey);
-                  setUsername(account.username);
-                  setPassword(account.password);
-                }}
-                className="rounded-md border border-white/10 bg-white/[.035] p-3 text-left text-sm hover:bg-white/[.07]"
-              >
-                <span className="font-semibold text-white">{account.label}</span>
-              <span className="mt-1 block text-slate-400">{account.userKey} / {account.username} / {account.password}</span>
-              </button>
-            ))}
+          <div className="mt-6 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm leading-6 text-amber-50">
+            Credentials are never displayed on this portal. The creator controls candidate and staff access from inside the secured workspace.
           </div>
         </div>
       </section>
@@ -420,6 +421,7 @@ function ModuleNav({
     { key: "voters", label: "Voters", icon: <Database size={16} />, roles: ["candidate", "clerk"] },
     { key: "party", label: "Party", icon: <Landmark size={16} />, roles: ["candidate"] },
     { key: "access", label: "Access", icon: <Users size={16} />, roles: ["candidate"] },
+    { key: "meetings", label: "Meetings", icon: <MapPin size={16} />, roles: ["candidate", "clerk"] },
     { key: "customize", label: "Customize", icon: <Palette size={16} />, roles: ["candidate"] }
   ];
   const modules = allModules.filter((module) => module.roles?.includes(workspaceRole) ?? true);
@@ -450,12 +452,14 @@ function CommandModule({
   selectedSignals,
   setSelectedRegion,
   customVisits,
+  meetingAttendees,
   addVisitToSelectedRegion
 }: {
   selectedRegion: (typeof commandData.regions)[number];
   selectedSignals: number;
   setSelectedRegion: (region: (typeof commandData.regions)[number]) => void;
   customVisits: Array<{ title: string; type: string; region: string; attendance: number; sentiment: number; x: number; y: number }>;
+  meetingAttendees: MeetingAttendee[];
   addVisitToSelectedRegion: () => void;
 }) {
   const visits = [...customVisits, ...commandData.candidateVisits];
@@ -516,6 +520,21 @@ function CommandModule({
                     </span>
                   </button>
                 ))}
+                {meetingAttendees.map((attendee) => (
+                  <button
+                    key={`${attendee.phone}-${attendee.attendedAt}`}
+                    className="absolute flex -translate-x-1/2 -translate-y-full flex-col items-center gap-1"
+                    style={{ left: `${attendee.x}%`, top: `${attendee.y}%` }}
+                    title={`${attendee.name} / ${attendee.location}`}
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-200 bg-emerald-300 text-slate-950 shadow-intel">
+                      <Users size={15} />
+                    </span>
+                    <span className="max-w-32 rounded-sm bg-slate-950/90 px-2 py-1 text-[11px] font-medium text-emerald-100">
+                      Meeting
+                    </span>
+                  </button>
+                ))}
               </div>
               <aside className="border-t border-white/10 p-4 lg:border-l lg:border-t-0">
                 <p className="text-sm text-slate-400">Selected region</p>
@@ -549,6 +568,12 @@ function CommandModule({
                   <p className="text-sm text-amber-100">Candidate visits</p>
                   <strong className="mt-1 block text-2xl text-white">
                     {visits.filter((visit) => visit.region === selectedRegion.name).length}
+                  </strong>
+                </div>
+                <div className="mt-3 rounded-md border border-emerald-300/20 bg-emerald-300/10 p-3">
+                  <p className="text-sm text-emerald-100">Meeting attendees</p>
+                  <strong className="mt-1 block text-2xl text-white">
+                    {meetingAttendees.filter((attendee) => attendee.location === selectedRegion.name).length}
                   </strong>
                 </div>
                 <button onClick={addVisitToSelectedRegion} className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-md bg-amber-300 font-semibold text-slate-950 hover:bg-amber-200">
@@ -747,7 +772,16 @@ function SocialModule({
   const [message, setMessage] = useState(commandData.mediaStrategies[0].message);
   const [period, setPeriod] = useState(commandData.mediaStrategies[0].period);
   const [asset, setAsset] = useState(commandData.mediaStrategies[0].assets[0]);
+  const [uploadedAssetPreview, setUploadedAssetPreview] = useState("");
   const posts = commandData.posts.filter((post) => sentiment === "ALL" || post.sentiment === sentiment);
+  function uploadMediaAsset(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setAsset(file.name);
+    const reader = new FileReader();
+    reader.onload = () => setUploadedAssetPreview(String(reader.result));
+    reader.readAsDataURL(file);
+  }
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.9fr_1.1fr]">
       <Panel title="Media Strategy Room" icon={<Megaphone size={20} />}>
@@ -756,7 +790,20 @@ function SocialModule({
           <input value={period} onChange={(event) => setPeriod(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
           <select value={asset} onChange={(event) => setAsset(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
             {commandData.mediaStrategies.flatMap((item) => item.assets).map((item) => <option key={item}>{item}</option>)}
+            {asset && !commandData.mediaStrategies.flatMap((item) => item.assets).includes(asset) ? <option>{asset}</option> : null}
           </select>
+          <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-sky-300/40 bg-sky-300/5 p-4 text-center hover:bg-sky-300/10">
+            <input className="hidden" type="file" accept="image/*" onChange={uploadMediaAsset} />
+            {uploadedAssetPreview ? (
+              <img src={uploadedAssetPreview} alt="Uploaded media strategy asset preview" className="max-h-40 rounded-md object-contain" />
+            ) : (
+              <>
+                <Megaphone className="mb-2 text-sky-200" />
+                <span className="text-sm font-semibold text-white">Upload campaign image</span>
+                <span className="mt-1 text-xs text-slate-400">PNG, JPG, or WebP for the selected media push</span>
+              </>
+            )}
+          </label>
           <button
             onClick={() => publishMessage({ message, period, asset, channels: ["X", "Facebook", "TikTok", "WhatsApp"] })}
             className="h-11 w-full rounded-md bg-sky-300 font-semibold text-slate-950 hover:bg-sky-200"
@@ -863,7 +910,7 @@ function SurveyModule({ surveyResponses }: { surveyResponses: SurveyResponse[] }
   const [qrVersions, setQrVersions] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    setBaseUrl(`${window.location.origin}/survey`);
+    setBaseUrl(`${process.env.NEXT_PUBLIC_PUBLIC_APP_URL ?? window.location.origin}/survey`);
   }, []);
 
   useEffect(() => {
@@ -926,7 +973,7 @@ function SurveyModule({ surveyResponses }: { surveyResponses: SurveyResponse[] }
                 <p className="mt-3 text-sm text-slate-300">Sentiment score {survey.sentiment}</p>
                 <p className="mt-2 text-xs text-slate-400">Target: {survey.target}</p>
               </button>
-              <QrPreview value={`${baseUrl}/${survey.slug}?qr=${qrVersions[survey.slug] ?? 1}`} />
+              <QrPreview value={`${baseUrl}/${survey.slug}`} cacheKey={String(qrVersions[survey.slug] ?? 1)} />
               <button
                 onClick={() => setQrVersions((versions) => ({ ...versions, [survey.slug]: Date.now() }))}
                 className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-md border border-white/10 px-3 text-sm font-semibold text-slate-200 hover:bg-white/[.06]"
@@ -994,12 +1041,11 @@ function SurveyModule({ surveyResponses }: { surveyResponses: SurveyResponse[] }
   );
 }
 
-function QrPreview({ value }: { value: string }) {
-  const qrSource = `https://api.qrserver.com/v1/create-qr-code/?size=132x132&margin=8&data=${encodeURIComponent(value)}`;
+function QrPreview({ value, cacheKey }: { value: string; cacheKey: string }) {
+  const qrSource = `https://api.qrserver.com/v1/create-qr-code/?size=132x132&margin=8&data=${encodeURIComponent(value)}&cache=${cacheKey}`;
   return (
-    <div className="mt-4 inline-flex flex-col gap-2">
-      <img src={qrSource} alt={`QR code for ${value}`} className="h-32 w-32 rounded-md bg-white p-1" />
-      <p className="max-w-52 break-all text-xs text-slate-500">{value}</p>
+    <div className="mt-4 inline-flex">
+      <img src={qrSource} alt="Public survey QR code" className="h-32 w-32 rounded-md bg-white p-1" />
     </div>
   );
 }
@@ -1111,12 +1157,14 @@ function CommunicationsModule({
   sentMessages,
   sendAfricaTalkingMessage,
   fieldAgents,
-  staffMembers
+  staffMembers,
+  meetingAttendees
 }: {
   sentMessages: Array<{ target: string; message: string; channel: string; provider: string }>;
   sendAfricaTalkingMessage: (message: { target: string; message: string; channel: string }) => void;
   fieldAgents: Array<{ name: string; phone: string; pollingStation: string; ward: string; status: string }>;
   staffMembers: StaffMember[];
+  meetingAttendees: MeetingAttendee[];
 }) {
   const [target, setTarget] = useState("Nairobi West agents");
   const [channel, setChannel] = useState("SMS");
@@ -1126,8 +1174,9 @@ function CommunicationsModule({
     if (target === "All staff") return staffMembers.map((member) => ({ name: member.name, phone: member.phone }));
     if (target === "Media team") return staffMembers.filter((member) => member.role === "media").map((member) => ({ name: member.name, phone: member.phone }));
     if (target === "Clerks") return staffMembers.filter((member) => member.role === "clerk").map((member) => ({ name: member.name, phone: member.phone }));
+    if (target === "Meeting attendees") return meetingAttendees.map((attendee) => ({ name: attendee.name, phone: attendee.phone }));
     return fieldAgents.filter((agent) => agent.ward === "Nairobi West").map((agent) => ({ name: agent.name, phone: agent.phone }));
-  }, [fieldAgents, staffMembers, target]);
+  }, [fieldAgents, meetingAttendees, staffMembers, target]);
 
   function sendBulkMessage() {
     targetRecipients.forEach((recipient) => {
@@ -1143,6 +1192,7 @@ function CommunicationsModule({
             <option>Nairobi West agents</option>
             <option>All field agents</option>
             <option>All staff</option>
+            <option>Meeting attendees</option>
             <option>Media team</option>
             <option>Clerks</option>
           </select>
@@ -1225,7 +1275,9 @@ function CreatorModule({
   deleteCandidate,
   addPoliticalParty,
   deletePoliticalParty,
-  platformParties
+  platformParties,
+  creatorAccount,
+  updateCreatorAccount
 }: {
   addCandidate: (candidate: { name: string; office: string; party: string; region: string; userKey: string; username: string; password: string }) => void;
   onboardedCandidates: Array<{ name: string; office: string; party: string; region: string }>;
@@ -1239,6 +1291,8 @@ function CreatorModule({
   addPoliticalParty: (party: { name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }) => void;
   deletePoliticalParty: (abbreviation: string) => void;
   platformParties: Array<{ name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }>;
+  creatorAccount: CreatorAccount;
+  updateCreatorAccount: (account: CreatorAccount) => void;
 }) {
   const [name, setName] = useState("New Candidate");
   const [office, setOffice] = useState("Governor");
@@ -1247,6 +1301,7 @@ function CreatorModule({
   const [userKey, setUserKey] = useState("CLIENT-2027");
   const [username, setUsername] = useState("candidate@example.com");
   const [password, setPassword] = useState("Candidate123!");
+  const [creatorDraft, setCreatorDraft] = useState(creatorAccount);
   const [partyName, setPartyName] = useState("New Political Party");
   const [partyAbbr, setPartyAbbr] = useState("NPP");
   const candidates = [...onboardedCandidates, ...commandData.candidates.filter((candidate) => !deletedCandidateNames.includes(candidate.name))];
@@ -1310,13 +1365,16 @@ function CreatorModule({
         </div>
       </Panel>
       <div className="xl:col-span-2">
-        <Panel title="Creator Password Control" icon={<ShieldCheck size={20} />}>
-          <div className="grid gap-3 md:grid-cols-[auto_1fr]">
-            <button onClick={() => changePassword("creator@pios.local")} className="h-11 rounded-md bg-sky-300 px-4 font-semibold text-slate-950">
-              Change My Password
+        <Panel title="Creator Credential Control" icon={<ShieldCheck size={20} />}>
+          <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">
+            <input value={creatorDraft.userKey} onChange={(event) => setCreatorDraft({ ...creatorDraft, userKey: event.target.value })} placeholder="Creator user key" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <input value={creatorDraft.username} onChange={(event) => setCreatorDraft({ ...creatorDraft, username: event.target.value })} placeholder="Creator username" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <input value={creatorDraft.password} onChange={(event) => setCreatorDraft({ ...creatorDraft, password: event.target.value })} placeholder="Creator password" type="password" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <button onClick={() => updateCreatorAccount(creatorDraft)} className="h-11 rounded-md bg-sky-300 px-4 font-semibold text-slate-950">
+              Save
             </button>
             <div className="rounded-md border border-white/10 bg-white/[.035] p-3 text-sm text-slate-300">
-              Creator controls candidate access by resetting passwords, suspending usage, or deleting candidate accounts.
+              The creator can change their own user key, username, and password. Candidate access remains controlled from onboarding and candidate records.
             </div>
           </div>
           <div className="mt-4 grid gap-2">
@@ -1504,6 +1562,100 @@ function AccessModule({
             <Plus size={16} />
             Connect Social Handle
           </button>
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function MeetingsModule({
+  meetingAttendees,
+  addMeetingAttendee,
+  sendAfricaTalkingMessage
+}: {
+  meetingAttendees: MeetingAttendee[];
+  addMeetingAttendee: (attendee: Omit<MeetingAttendee, "attendedAt">) => void;
+  sendAfricaTalkingMessage: (message: { target: string; message: string; channel: string }) => void;
+}) {
+  const [name, setName] = useState("Home meeting attendee");
+  const [phone, setPhone] = useState("+254700000000");
+  const [location, setLocation] = useState(commandData.regions[0].name);
+  const [meetingType, setMeetingType] = useState("Home meeting");
+  const [supportScore, setSupportScore] = useState(70);
+  const selectedRegion = commandData.regions.find((region) => region.name === location) ?? commandData.regions[0];
+  const rankedAttendees = [...meetingAttendees].sort((a, b) => b.supportScore - a.supportScore);
+
+  function addAttendee() {
+    addMeetingAttendee({
+      name,
+      phone,
+      location,
+      meetingType,
+      supportScore,
+      x: selectedRegion.x + Math.min(8, Math.max(-8, (supportScore - 50) / 6)),
+      y: selectedRegion.y + Math.min(8, Math.max(-8, (50 - supportScore) / 6))
+    });
+  }
+
+  function bulkMessageLocation(targetLocation: string) {
+    meetingAttendees
+      .filter((attendee) => attendee.location === targetLocation)
+      .forEach((attendee) => {
+        sendAfricaTalkingMessage({
+          target: `${attendee.name} ${attendee.phone}`,
+          channel: "SMS",
+          message: `Thank you for attending the ${attendee.meetingType}. We will share the next campaign update for ${attendee.location}.`
+        });
+      });
+  }
+
+  return (
+    <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.8fr_1.2fr]">
+      <Panel title="Meeting Attendance Capture" icon={<Users size={20} />}>
+        <div className="space-y-3">
+          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Attendee name" className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+          <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="Phone number" className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+          <select value={location} onChange={(event) => setLocation(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
+            {commandData.regions.map((region) => <option key={region.code}>{region.name}</option>)}
+          </select>
+          <select value={meetingType} onChange={(event) => setMeetingType(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
+            <option>Home meeting</option>
+            <option>Estate caucus</option>
+            <option>Ward elders meeting</option>
+            <option>Youth group meeting</option>
+            <option>Women organizers meeting</option>
+          </select>
+          <label className="block text-sm text-slate-300">
+            Support rank
+            <input value={supportScore} onChange={(event) => setSupportScore(Number(event.target.value))} type="range" min="0" max="100" className="mt-2 w-full" />
+          </label>
+          <button onClick={addAttendee} className="h-11 w-full rounded-md bg-sky-300 font-semibold text-slate-950">
+            Record Attendance
+          </button>
+        </div>
+      </Panel>
+      <Panel title="Ranked Attendee List" icon={<MapPin size={20} />}>
+        <div className="mb-4 grid gap-2 md:grid-cols-3">
+          {commandData.regions.map((region) => (
+            <button key={region.code} onClick={() => bulkMessageLocation(region.name)} className="rounded-md border border-sky-300/40 px-3 py-2 text-sm font-semibold text-sky-100 hover:bg-sky-300/10">
+              Message {region.name}
+            </button>
+          ))}
+        </div>
+        <div className="space-y-3">
+          {rankedAttendees.map((attendee, index) => (
+            <article key={`${attendee.phone}-${attendee.attendedAt}`} className="rounded-md border border-white/10 bg-white/[.035] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs text-slate-400">Rank #{index + 1} / {attendee.location}</p>
+                  <h3 className="mt-1 font-semibold text-white">{attendee.name}</h3>
+                  <p className="mt-1 text-sm text-sky-100">{attendee.phone}</p>
+                </div>
+                <span className="rounded-sm border border-emerald-300/30 px-2 py-1 text-xs text-emerald-100">{attendee.supportScore}%</span>
+              </div>
+              <p className="mt-3 text-sm text-slate-300">{attendee.meetingType}</p>
+            </article>
+          ))}
         </div>
       </Panel>
     </section>
