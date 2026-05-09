@@ -53,9 +53,21 @@ function severityClass(severity: string) {
   return "border-sky-400/50 bg-sky-500/10 text-sky-100";
 }
 
+function regionMapStyle(region: (typeof commandData.regions)[number], selected: boolean) {
+  const fill = region.risk >= 70 ? "#ef4444" : region.support >= 58 ? "#22c55e" : region.momentum < 0 ? "#f59e0b" : "#38bdf8";
+  const ring = selected ? "#ffffff" : region.risk >= 70 ? "#fecaca" : region.support >= 58 ? "#bbf7d0" : region.momentum < 0 ? "#fde68a" : "#bae6fd";
+  const glow = region.risk >= 70 ? "239,68,68" : region.support >= 58 ? "34,197,94" : region.momentum < 0 ? "245,158,11" : "56,189,248";
+  return {
+    background: fill,
+    borderColor: ring,
+    boxShadow: `0 0 ${selected ? 34 : 22}px rgba(${glow}, .65)`
+  };
+}
+
 export function CommandCenter() {
   const {
     isAuthenticated,
+    seedDataEnabled,
     workspaceRole,
     activeIdentity,
     loginError,
@@ -113,7 +125,8 @@ export function CommandCenter() {
     publishMessage,
     sendAfricaTalkingMessage,
     updateCreatorAccount,
-    addMeetingAttendee
+    addMeetingAttendee,
+    clearSeedData
   } = useOpsStore();
   const [surveyResponses, setSurveyResponses] = useState<SurveyResponse[]>([]);
   useEffect(() => {
@@ -148,19 +161,22 @@ export function CommandCenter() {
   }, []);
   const selectedSignals = useMemo(
     () =>
-      commandData.posts.filter((signal) => signal.region.name === selectedRegion.name).length +
-      commandData.reports.filter((report) => report.region.name === selectedRegion.name).length,
-    [selectedRegion]
+      seedDataEnabled
+        ? commandData.posts.filter((signal) => signal.region.name === selectedRegion.name).length +
+          commandData.reports.filter((report) => report.region.name === selectedRegion.name).length
+        : 0,
+    [seedDataEnabled, selectedRegion]
   );
 
   if (!isAuthenticated) {
     return <LoginScreen login={login} loginError={loginError} />;
   }
 
+  const seedCandidates = seedDataEnabled ? commandData.candidates.filter((candidate) => !deletedCandidateNames.includes(candidate.name)) : [];
   const creatorClimateMetrics = [
-    { label: "Tracked candidates", value: String([...onboardedCandidates, ...commandData.candidates.filter((candidate) => !deletedCandidateNames.includes(candidate.name))].length), change: 12, tone: "positive" },
+    { label: "Tracked candidates", value: String([...onboardedCandidates, ...seedCandidates].length), change: 12, tone: "positive" },
     { label: "Regions monitored", value: String(commandData.regions.length), change: 4, tone: "neutral" },
-    { label: "Platform access users", value: String(commandData.candidateAccounts.length + [...onboardedCandidates, ...commandData.candidates].length), change: 9, tone: "positive" },
+    { label: "Platform access users", value: String((seedDataEnabled ? commandData.candidateAccounts.length : 0) + candidateLoginAccounts.length + staffMembers.length), change: 9, tone: "positive" },
     { label: "Climate risk index", value: "Medium", change: -3, tone: "neutral" }
   ];
   const visibleMetrics = workspaceRole === "creator" ? creatorClimateMetrics : workspaceRole === "clerk" ? commandData.metrics.slice(1, 3) : commandData.metrics;
@@ -243,6 +259,7 @@ export function CommandCenter() {
             setSelectedRegion={setSelectedRegion}
             customVisits={customVisits}
             meetingAttendees={meetingAttendees}
+            seedDataEnabled={seedDataEnabled}
             addVisitToSelectedRegion={addVisitToSelectedRegion}
           />
         ) : null}
@@ -295,6 +312,8 @@ export function CommandCenter() {
             platformParties={platformParties}
             creatorAccount={creatorAccount}
             updateCreatorAccount={updateCreatorAccount}
+            seedDataEnabled={seedDataEnabled}
+            clearSeedData={clearSeedData}
           />
         ) : null}
         {activeModule === "access" ? (
@@ -450,6 +469,7 @@ function CommandModule({
   setSelectedRegion,
   customVisits,
   meetingAttendees,
+  seedDataEnabled,
   addVisitToSelectedRegion
 }: {
   selectedRegion: (typeof commandData.regions)[number];
@@ -457,9 +477,14 @@ function CommandModule({
   setSelectedRegion: (region: (typeof commandData.regions)[number]) => void;
   customVisits: Array<{ title: string; type: string; region: string; attendance: number; sentiment: number; x: number; y: number }>;
   meetingAttendees: MeetingAttendee[];
+  seedDataEnabled: boolean;
   addVisitToSelectedRegion: () => void;
 }) {
-  const visits = [...customVisits, ...commandData.candidateVisits];
+  const visits = [...customVisits, ...(seedDataEnabled ? commandData.candidateVisits : [])];
+  const commandAlerts = seedDataEnabled ? commandData.alerts : [];
+  const commandInsights = seedDataEnabled ? commandData.insights : [];
+  const commandPosts = seedDataEnabled ? commandData.posts : [];
+  const commandReports = seedDataEnabled ? commandData.reports : [];
   return (
     <>
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.45fr_.9fr]">
@@ -470,9 +495,10 @@ function CommandModule({
                 <p className="text-sm text-slate-400">Support, risk, incidents, and mobilization gaps by region</p>
               </div>
               <div className="flex gap-2 text-xs text-slate-300">
-                <span className="rounded-sm border border-emerald-300/30 px-2 py-1 text-emerald-200">Support</span>
-                <span className="rounded-sm border border-rose-300/30 px-2 py-1 text-rose-200">Risk</span>
-                <span className="rounded-sm border border-sky-300/30 px-2 py-1 text-sky-200">Signals</span>
+                <span className="rounded-sm border border-emerald-300/60 bg-emerald-400/15 px-2 py-1 text-emerald-100">Support</span>
+                <span className="rounded-sm border border-rose-300/60 bg-rose-400/15 px-2 py-1 text-rose-100">Risk</span>
+                <span className="rounded-sm border border-amber-300/60 bg-amber-400/15 px-2 py-1 text-amber-100">Decline</span>
+                <span className="rounded-sm border border-sky-300/60 bg-sky-400/15 px-2 py-1 text-sky-100">Growth</span>
               </div>
             </div>
             <div className="grid gap-0 lg:grid-cols-[1fr_280px]">
@@ -485,18 +511,7 @@ function CommandModule({
                     className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2"
                     style={{ left: `${region.x}%`, top: `${region.y}%` }}
                   >
-                    <span
-                      className={`h-16 w-16 rounded-full border ${
-                        selectedRegion.code === region.code
-                          ? "border-sky-200 bg-sky-300/25"
-                          : "border-white/20 bg-white/10"
-                      }`}
-                      style={{
-                        boxShadow: `0 0 ${18 + region.risk / 2}px rgba(${
-                          region.risk > 60 ? "244,63,94" : "56,189,248"
-                        }, .35)`
-                      }}
-                    />
+                    <span className="h-16 w-16 rounded-full border-4" style={regionMapStyle(region, selectedRegion.code === region.code)} />
                     <span className="max-w-28 rounded-sm bg-slate-950/80 px-2 py-1 text-xs font-medium text-slate-100">
                       {region.name}
                     </span>
@@ -590,7 +605,7 @@ function CommandModule({
               <Siren className="text-rose-200" size={20} />
             </div>
             <div className="scrollbar-thin max-h-[520px] space-y-3 overflow-auto p-4">
-              {commandData.alerts.map((alert) => (
+              {commandAlerts.map((alert) => (
                 <article key={alert.title} className={`rounded-md border p-4 ${severityClass(alert.severity)}`}>
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <span className="text-xs font-bold">{alert.severity}</span>
@@ -607,7 +622,7 @@ function CommandModule({
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
           <Panel title="AI Strategy Engine" icon={<BrainCircuit size={20} />}>
             <div className="space-y-3">
-              {commandData.insights.map((insight) => (
+              {commandInsights.map((insight) => (
                 <article key={insight.title} className="rounded-md border border-white/10 bg-white/[.035] p-4">
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <h3 className="font-semibold text-white">{insight.title}</h3>
@@ -624,7 +639,7 @@ function CommandModule({
 
           <Panel title="Narrative Feed" icon={<CircleDot size={20} />}>
             <div className="space-y-3">
-              {commandData.posts.map((post) => (
+              {commandPosts.map((post) => (
                 <article key={post.text} className="rounded-md border border-white/10 bg-white/[.035] p-4">
                   <div className="mb-2 flex items-center justify-between gap-3 text-xs text-slate-400">
                     <span>{post.source} / {post.authorHandle}</span>
@@ -644,7 +659,7 @@ function CommandModule({
 
           <Panel title="Field Operations" icon={<Users size={20} />}>
             <div className="space-y-3">
-              {commandData.reports.map((report) => (
+              {commandReports.map((report) => (
                 <article key={report.title} className="rounded-md border border-white/10 bg-white/[.035] p-4">
                   <div className="mb-2 flex items-center justify-between gap-3 text-xs text-slate-400">
                     <span>{report.type.replaceAll("_", " ")}</span>
@@ -1274,7 +1289,9 @@ function CreatorModule({
   deletePoliticalParty,
   platformParties,
   creatorAccount,
-  updateCreatorAccount
+  updateCreatorAccount,
+  seedDataEnabled,
+  clearSeedData
 }: {
   addCandidate: (candidate: { name: string; office: string; party: string; region: string; userKey: string; username: string; password: string }) => void;
   onboardedCandidates: Array<{ name: string; office: string; party: string; region: string }>;
@@ -1290,6 +1307,8 @@ function CreatorModule({
   platformParties: Array<{ name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }>;
   creatorAccount: CreatorAccount;
   updateCreatorAccount: (account: CreatorAccount) => void;
+  seedDataEnabled: boolean;
+  clearSeedData: () => void;
 }) {
   const [name, setName] = useState("New Candidate");
   const [office, setOffice] = useState("Governor");
@@ -1301,9 +1320,10 @@ function CreatorModule({
   const [creatorDraft, setCreatorDraft] = useState(creatorAccount);
   const [partyName, setPartyName] = useState("New Political Party");
   const [partyAbbr, setPartyAbbr] = useState("NPP");
-  const candidates = [...onboardedCandidates, ...commandData.candidates.filter((candidate) => !deletedCandidateNames.includes(candidate.name))];
+  const seedCandidates = seedDataEnabled ? commandData.candidates.filter((candidate) => !deletedCandidateNames.includes(candidate.name)) : [];
+  const candidates = [...onboardedCandidates, ...seedCandidates];
   const activeCandidateCount = candidates.filter((candidate) => candidateStatuses[candidate.name] !== "Suspended").length;
-  const accessCount = commandData.candidateAccounts.length + activeCandidateCount;
+  const accessCount = candidateLoginAccounts.length + activeCandidateCount;
 
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.85fr_1.15fr]">
@@ -1361,6 +1381,23 @@ function CreatorModule({
           ))}
         </div>
       </Panel>
+      <div className="xl:col-span-2">
+        <Panel title="Seed Data Control" icon={<Database size={20} />}>
+          <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+            <div className="rounded-md border border-white/10 bg-white/[.035] p-3 text-sm leading-6 text-slate-300">
+              Seed data is only a demo layer. Clear it before onboarding real candidates so demo agents, resources, candidate accounts, visits, and communications do not mix with live client work.
+              <span className="mt-2 block font-semibold text-white">Status: {seedDataEnabled ? "Seed data enabled" : "Seed data cleared"}</span>
+            </div>
+            <button
+              onClick={clearSeedData}
+              disabled={!seedDataEnabled}
+              className="h-11 rounded-md border border-rose-300/40 px-4 font-semibold text-rose-100 hover:bg-rose-300/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Clear Seed Data
+            </button>
+          </div>
+        </Panel>
+      </div>
       <div className="xl:col-span-2">
         <Panel title="Creator Credential Control" icon={<ShieldCheck size={20} />}>
           <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">

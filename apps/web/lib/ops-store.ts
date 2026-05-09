@@ -73,6 +73,7 @@ export type LoginResult = {
 
 type OpsState = {
   isAuthenticated: boolean;
+  seedDataEnabled: boolean;
   workspaceRole: WorkspaceRole;
   activeIdentity: string;
   loginError: string;
@@ -131,12 +132,14 @@ type OpsState = {
   sendAfricaTalkingMessage: (message: { target: string; message: string; channel: string }) => void;
   updateCreatorAccount: (account: CreatorAccount) => void;
   addMeetingAttendee: (attendee: Omit<MeetingAttendee, "attendedAt">) => void;
+  clearSeedData: () => void;
 };
 
 export const useOpsStore = create<OpsState>()(
   persist(
     (set, get) => ({
   isAuthenticated: false,
+  seedDataEnabled: true,
   workspaceRole: "candidate",
   activeIdentity: "",
   loginError: "",
@@ -343,6 +346,28 @@ export const useOpsStore = create<OpsState>()(
         { ...attendee, attendedAt: new Date().toISOString() },
         ...state.meetingAttendees
       ]
+    })),
+  clearSeedData: () =>
+    set((state) => ({
+      seedDataEnabled: false,
+      candidateLoginAccounts: state.candidateLoginAccounts.filter((account) => account.candidateName !== commandData.campaign.candidate),
+      deletedCandidateNames: commandData.candidates.map((candidate) => candidate.name),
+      fieldAgents: [],
+      staffMembers: [],
+      staffPasswords: {},
+      resourceAllocations: [],
+      socialHandles: [],
+      publishedMessages: [],
+      sentMessages: [],
+      customVisits: [],
+      fieldDrafts: [],
+      meetingAttendees: [],
+      uploadedVoterFile: "",
+      generatedBriefing: "",
+      campaignName: "New Campaign Workspace",
+      candidateName: "Unassigned Candidate",
+      campaignSlogan: "Configure this workspace from onboarding.",
+      activeModule: "creator"
     }))
     }),
     {
@@ -350,6 +375,7 @@ export const useOpsStore = create<OpsState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         isAuthenticated: state.isAuthenticated,
+        seedDataEnabled: state.seedDataEnabled,
         workspaceRole: state.workspaceRole,
         activeIdentity: state.activeIdentity,
         activeModule: state.activeModule,
@@ -379,10 +405,13 @@ export const useOpsStore = create<OpsState>()(
       merge: (persistedState, currentState) => {
         const persisted = persistedState as Partial<OpsState>;
         const seededCandidate = currentState.candidateLoginAccounts[0];
+        const seedDataEnabled = persisted.seedDataEnabled ?? currentState.seedDataEnabled;
         const candidateLoginAccounts = persisted.candidateLoginAccounts?.length
           ? persisted.candidateLoginAccounts
-          : [seededCandidate];
-        return { ...currentState, ...persisted, candidateLoginAccounts };
+          : seedDataEnabled
+            ? [seededCandidate]
+            : [];
+        return { ...currentState, ...persisted, seedDataEnabled, candidateLoginAccounts };
       }
     }
   )
