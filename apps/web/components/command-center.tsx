@@ -8,6 +8,8 @@ import {
   CircleDot,
   ClipboardList,
   Database,
+  Eye,
+  EyeOff,
   FileText,
   Handshake,
   Landmark,
@@ -98,6 +100,7 @@ export function CommandCenter() {
     sentMessages,
     creatorAccount,
     login,
+    completeExternalLogin,
     logout,
     setActiveModule,
     setSelectedRegion,
@@ -169,7 +172,7 @@ export function CommandCenter() {
   );
 
   if (!isAuthenticated) {
-    return <LoginScreen login={login} loginError={loginError} />;
+    return <LoginScreen login={login} completeExternalLogin={completeExternalLogin} loginError={loginError} />;
   }
 
   const seedCandidates = seedDataEnabled ? commandData.candidates.filter((candidate) => !deletedCandidateNames.includes(candidate.name)) : [];
@@ -179,7 +182,14 @@ export function CommandCenter() {
     { label: "Platform access users", value: String((seedDataEnabled ? commandData.candidateAccounts.length : 0) + candidateLoginAccounts.length + staffMembers.length), change: 9, tone: "positive" },
     { label: "Climate risk index", value: "Medium", change: -3, tone: "neutral" }
   ];
-  const visibleMetrics = workspaceRole === "creator" ? creatorClimateMetrics : workspaceRole === "clerk" ? commandData.metrics.slice(1, 3) : commandData.metrics;
+  const blankCandidateMetrics = [
+    { label: "Win probability", value: "0%", change: 0, tone: "neutral" },
+    { label: "Positive field signals", value: "0", change: 0, tone: "neutral" },
+    { label: "Negative social spikes", value: "0", change: 0, tone: "neutral" },
+    { label: "Priority swing areas", value: "0", change: 0, tone: "neutral" }
+  ];
+  const candidateMetricSource = seedDataEnabled ? commandData.metrics : blankCandidateMetrics;
+  const visibleMetrics = workspaceRole === "creator" ? creatorClimateMetrics : workspaceRole === "clerk" ? candidateMetricSource.slice(1, 3) : candidateMetricSource;
   const candidateMetrics = workspaceRole === "creator" ? visibleMetrics : visibleMetrics.map((metric) => (metric.label === "Positive field signals" ? { ...metric, value: String(Number(metric.value) + surveyResponses.length) } : metric));
   const headerTitle = workspaceRole === "creator" ? "House Aurelius PIOS" : candidateName;
   const headerSubtitle =
@@ -227,7 +237,7 @@ export function CommandCenter() {
           {workspaceRole === "creator" ? (
             <> This is the House Aurelius platform administration workspace.</>
           ) : (
-            <> Candidate staff access is tied to user key <span className="font-semibold text-sky-100">AMINA-2027</span>.</>
+            <> Candidate staff access is tied to the candidate user key configured by the creator.</>
           )}
         </div>
 
@@ -251,7 +261,7 @@ export function CommandCenter() {
           ))}
         </section>
 
-        {activeModule === "command" && workspaceRole === "creator" ? <CreatorClimateModule /> : null}
+        {activeModule === "command" && workspaceRole === "creator" ? <CreatorClimateModule seedDataEnabled={seedDataEnabled} onboardedCandidates={onboardedCandidates} /> : null}
         {activeModule === "command" && workspaceRole !== "creator" ? (
           <CommandModule
             selectedRegion={selectedRegion}
@@ -272,17 +282,18 @@ export function CommandCenter() {
             addFieldAgent={addFieldAgent}
             updateFieldAgent={updateFieldAgent}
             deleteFieldAgent={deleteFieldAgent}
+            seedDataEnabled={seedDataEnabled}
           />
         ) : null}
         {activeModule === "social" ? (
-          <SocialModule publishedMessages={publishedMessages} publishMessage={publishMessage} />
+          <SocialModule publishedMessages={publishedMessages} publishMessage={publishMessage} seedDataEnabled={seedDataEnabled} />
         ) : null}
         {activeModule === "ai" ? (
-          <AiModule generatedBriefing={generatedBriefing} generateBriefing={generateBriefing} surveyResponses={surveyResponses} />
+          <AiModule generatedBriefing={generatedBriefing} generateBriefing={generateBriefing} surveyResponses={surveyResponses} seedDataEnabled={seedDataEnabled} />
         ) : null}
         {activeModule === "crm" ? <CrmModule /> : null}
         {activeModule === "surveys" ? <SurveyModule surveyResponses={surveyResponses} /> : null}
-        {activeModule === "alerts" ? <AlertsModule surveyResponses={surveyResponses} /> : null}
+        {activeModule === "alerts" ? <AlertsModule surveyResponses={surveyResponses} seedDataEnabled={seedDataEnabled} /> : null}
         {activeModule === "deployment" ? (
           <DeploymentModule
             resourceAllocations={resourceAllocations}
@@ -291,7 +302,7 @@ export function CommandCenter() {
           />
         ) : null}
         {activeModule === "voters" ? (
-          <VoterImportModule uploadedVoterFile={uploadedVoterFile} setUploadedVoterFile={setUploadedVoterFile} />
+          <VoterImportModule uploadedVoterFile={uploadedVoterFile} setUploadedVoterFile={setUploadedVoterFile} seedDataEnabled={seedDataEnabled} />
         ) : null}
         {activeModule === "party" ? (
           <PartyModule selectedParty={selectedParty} setSelectedParty={setSelectedParty} platformParties={platformParties} />
@@ -362,18 +373,41 @@ export function CommandCenter() {
 
 function LoginScreen({
   login,
+  completeExternalLogin,
   loginError
 }: {
   login: (credentials: { userKey: string; username: string; password: string }) => { ok: boolean; message: string };
+  completeExternalLogin: (account: { username: string; role: WorkspaceRole; candidateName?: string }) => void;
   loginError: string;
 }) {
   const [userKey, setUserKey] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [remoteLoginError, setRemoteLoginError] = useState("");
 
-  function submitLogin(event: React.FormEvent) {
+  async function submitLogin(event: React.FormEvent) {
     event.preventDefault();
-    login({ userKey, username, password });
+    setRemoteLoginError("");
+    const localResult = login({ userKey, username, password });
+    if (localResult.ok) return;
+    const apiBase = process.env.NEXT_PUBLIC_API_URL;
+    if (!apiBase) return;
+    try {
+      const response = await fetch(`${apiBase}/api/v1/public/accounts/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userKey, username, password })
+      });
+      const result = (await response.json()) as { ok?: boolean; username?: string; role?: WorkspaceRole; candidateName?: string; message?: string };
+      if (response.ok && result.ok && result.username && result.role) {
+        completeExternalLogin({ username: result.username, role: result.role, candidateName: result.candidateName });
+        return;
+      }
+      setRemoteLoginError(result.message ?? "Invalid user key, username, or password.");
+    } catch {
+      setRemoteLoginError("Could not reach the account service. Check the deployed API URL.");
+    }
   }
 
   return (
@@ -390,9 +424,6 @@ function LoginScreen({
               A House Aurelius product for political intelligence, candidate operations, and campaign command.
             </p>
           </div>
-          <div className="rounded-md border border-sky-300/20 bg-sky-300/10 p-4 text-sm leading-6 text-sky-50">
-            One secure portal routes creator, candidate, and candidate-staff accounts into the correct workspace. Candidate staff accounts are tied to a candidate user key and have scoped module access.
-          </div>
         </div>
         <div className="rounded-md border border-white/10 bg-command-900/90 p-6 shadow-intel">
           <h2 className="text-2xl font-semibold text-white">One login portal</h2>
@@ -402,8 +433,18 @@ function LoginScreen({
           <form onSubmit={submitLogin} className="mt-6 space-y-3">
             <input value={userKey} onChange={(event) => setUserKey(event.target.value)} placeholder="User key" className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
             <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username or email" className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
-            <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" type="password" className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
-            {loginError ? <p className="rounded-md border border-rose-300/30 bg-rose-300/10 p-3 text-sm text-rose-100">{loginError}</p> : null}
+            <div className="flex h-11 items-center rounded-md border border-white/10 bg-slate-950/60 focus-within:border-sky-300">
+              <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" type={showPassword ? "text" : "password"} className="h-full min-w-0 flex-1 bg-transparent px-3 text-sm text-white outline-none" />
+              <button
+                type="button"
+                onClick={() => setShowPassword((value) => !value)}
+                className="flex h-full w-12 items-center justify-center text-slate-300 hover:text-white"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+            {loginError || remoteLoginError ? <p className="rounded-md border border-rose-300/30 bg-rose-300/10 p-3 text-sm text-rose-100">{remoteLoginError || loginError}</p> : null}
             <button className="h-11 w-full rounded-md bg-sky-300 font-semibold text-slate-950 hover:bg-sky-200">
               Sign in
             </button>
@@ -686,7 +727,8 @@ function FieldModule({
   fieldAgents,
   addFieldAgent,
   updateFieldAgent,
-  deleteFieldAgent
+  deleteFieldAgent,
+  seedDataEnabled
 }: {
   fieldDrafts: Array<{ title: string; region: string; type: string }>;
   addFieldDraft: (draft: { title: string; region: string; type: string }) => void;
@@ -694,6 +736,7 @@ function FieldModule({
   addFieldAgent: (agent: { name: string; phone: string; pollingStation: string; ward: string; status: string }) => void;
   updateFieldAgent: (phone: string, patch: Partial<{ name: string; phone: string; pollingStation: string; ward: string; status: string }>) => void;
   deleteFieldAgent: (phone: string) => void;
+  seedDataEnabled: boolean;
 }) {
   const [title, setTitle] = useState("Polling station queue irregularity");
   const [region, setRegion] = useState("Nairobi West");
@@ -726,7 +769,7 @@ function FieldModule({
       </Panel>
       <Panel title="Sync Queue" icon={<Database size={20} />}>
         <div className="space-y-3">
-          {[...fieldDrafts, ...commandData.reports.map((report) => ({ title: report.title, region: report.region.name, type: report.type }))].map((report, index) => (
+          {[...fieldDrafts, ...(seedDataEnabled ? commandData.reports.map((report) => ({ title: report.title, region: report.region.name, type: report.type })) : [])].map((report, index) => (
             <article key={`${report.title}-${index}`} className="rounded-md border border-white/10 bg-white/[.035] p-4">
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span>{report.type.replaceAll("_", " ")}</span>
@@ -775,17 +818,19 @@ function FieldModule({
 
 function SocialModule({
   publishedMessages,
-  publishMessage
+  publishMessage,
+  seedDataEnabled
 }: {
   publishedMessages: Array<{ message: string; period: string; channels: string[]; asset: string }>;
   publishMessage: (message: { message: string; period: string; channels: string[]; asset: string }) => void;
+  seedDataEnabled: boolean;
 }) {
   const [sentiment, setSentiment] = useState("ALL");
-  const [message, setMessage] = useState(commandData.mediaStrategies[0].message);
-  const [period, setPeriod] = useState(commandData.mediaStrategies[0].period);
-  const [asset, setAsset] = useState(commandData.mediaStrategies[0].assets[0]);
+  const [message, setMessage] = useState(seedDataEnabled ? commandData.mediaStrategies[0].message : "");
+  const [period, setPeriod] = useState(seedDataEnabled ? commandData.mediaStrategies[0].period : "");
+  const [asset, setAsset] = useState(seedDataEnabled ? commandData.mediaStrategies[0].assets[0] : "");
   const [uploadedAssetPreview, setUploadedAssetPreview] = useState("");
-  const posts = commandData.posts.filter((post) => sentiment === "ALL" || post.sentiment === sentiment);
+  const posts = seedDataEnabled ? commandData.posts.filter((post) => sentiment === "ALL" || post.sentiment === sentiment) : [];
   function uploadMediaAsset(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -856,11 +901,13 @@ function SocialModule({
 function AiModule({
   generatedBriefing,
   generateBriefing,
-  surveyResponses
+  surveyResponses,
+  seedDataEnabled
 }: {
   generatedBriefing: string;
   generateBriefing: () => void;
   surveyResponses: SurveyResponse[];
+  seedDataEnabled: boolean;
 }) {
   const latestSurvey = surveyResponses[0];
   return (
@@ -878,7 +925,7 @@ function AiModule({
       </Panel>
       <Panel title="Recommendation Queue" icon={<CircleDot size={20} />}>
         <div className="space-y-3">
-          {commandData.insights.map((insight) => (
+          {(seedDataEnabled ? commandData.insights : []).map((insight) => (
             <article key={insight.title} className="rounded-md border border-white/10 bg-white/[.035] p-4">
               <h3 className="font-semibold text-white">{insight.title}</h3>
               <p className="mt-2 text-sm leading-6 text-slate-300">{insight.recommendation}</p>
@@ -1062,14 +1109,14 @@ function QrPreview({ value, cacheKey }: { value: string; cacheKey: string }) {
   );
 }
 
-function AlertsModule({ surveyResponses }: { surveyResponses: SurveyResponse[] }) {
+function AlertsModule({ surveyResponses, seedDataEnabled }: { surveyResponses: SurveyResponse[]; seedDataEnabled: boolean }) {
   const surveyAlerts = surveyResponses.slice(0, 3).map((response) => ({
     severity: "HIGH",
     title: "Fresh survey signal submitted",
     message: `New public survey response from ${String(response.answers.location ?? "unknown location")} is ready for AI triage and dashboard scoring.`,
     region: { name: String(response.answers.location ?? "Survey") }
   }));
-  const alerts = [...surveyAlerts, ...commandData.alerts];
+  const alerts = [...surveyAlerts, ...(seedDataEnabled ? commandData.alerts : [])];
   return (
     <Panel title="Alert Operations" icon={<Siren size={20} />}>
       <div className="mb-4 rounded-md border border-white/10 bg-white/[.035] p-3 text-sm leading-6 text-slate-300">
@@ -1240,7 +1287,14 @@ function CommunicationsModule({
   );
 }
 
-function CreatorClimateModule() {
+function CreatorClimateModule({
+  seedDataEnabled,
+  onboardedCandidates
+}: {
+  seedDataEnabled: boolean;
+  onboardedCandidates: Array<{ name: string; office: string; party: string; region: string }>;
+}) {
+  const climateCandidates = [...onboardedCandidates, ...(seedDataEnabled ? commandData.candidates : [])];
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
       <Panel title="Overall Political Climate" icon={<Activity size={20} />}>
@@ -1260,7 +1314,7 @@ function CreatorClimateModule() {
       </Panel>
       <Panel title="Candidate Portfolio Climate" icon={<Users size={20} />}>
         <div className="space-y-3">
-          {commandData.candidates.map((candidate) => (
+          {climateCandidates.map((candidate) => (
             <article key={candidate.name} className="rounded-md border border-white/10 bg-white/[.035] p-4">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="font-semibold text-white">{candidate.name}</h3>
@@ -1324,6 +1378,29 @@ function CreatorModule({
   const candidates = [...onboardedCandidates, ...seedCandidates];
   const activeCandidateCount = candidates.filter((candidate) => candidateStatuses[candidate.name] !== "Suspended").length;
   const accessCount = candidateLoginAccounts.length + activeCandidateCount;
+  async function onboardCandidate() {
+    const account = { name, office, party, region, userKey, username, password };
+    const apiBase = process.env.NEXT_PUBLIC_API_URL;
+    if (apiBase) {
+      await fetch(`${apiBase}/api/v1/public/accounts/candidates`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(account)
+      });
+    }
+    addCandidate(account);
+  }
+  async function saveCreatorAccount() {
+    const apiBase = process.env.NEXT_PUBLIC_API_URL;
+    if (apiBase) {
+      await fetch(`${apiBase}/api/v1/public/accounts/creator`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(creatorDraft)
+      });
+    }
+    updateCreatorAccount(creatorDraft);
+  }
 
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.85fr_1.15fr]">
@@ -1332,6 +1409,7 @@ function CreatorModule({
           <input value={name} onChange={(event) => setName(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
           <input value={office} onChange={(event) => setOffice(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
           <select value={party} onChange={(event) => setParty(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
+            {!platformParties.length ? <option value="">Create a party first</option> : null}
             {platformParties.map((item) => <option key={item.abbreviation} value={item.abbreviation}>{item.name} ({item.abbreviation})</option>)}
           </select>
           <input value={region} onChange={(event) => setRegion(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
@@ -1343,7 +1421,7 @@ function CreatorModule({
               <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Temporary password" className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
             </div>
           </div>
-          <button onClick={() => addCandidate({ name, office, party, region, userKey, username, password })} className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-sky-300 font-semibold text-slate-950 hover:bg-sky-200">
+          <button onClick={onboardCandidate} disabled={!party} className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-sky-300 font-semibold text-slate-950 hover:bg-sky-200 disabled:cursor-not-allowed disabled:opacity-50">
             <Plus size={16} />
             Onboard Candidate
           </button>
@@ -1404,7 +1482,7 @@ function CreatorModule({
             <input value={creatorDraft.userKey} onChange={(event) => setCreatorDraft({ ...creatorDraft, userKey: event.target.value })} placeholder="Creator user key" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
             <input value={creatorDraft.username} onChange={(event) => setCreatorDraft({ ...creatorDraft, username: event.target.value })} placeholder="Creator username" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
             <input value={creatorDraft.password} onChange={(event) => setCreatorDraft({ ...creatorDraft, password: event.target.value })} placeholder="Creator password" type="password" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
-            <button onClick={() => updateCreatorAccount(creatorDraft)} className="h-11 rounded-md bg-sky-300 px-4 font-semibold text-slate-950">
+            <button onClick={saveCreatorAccount} className="h-11 rounded-md bg-sky-300 px-4 font-semibold text-slate-950">
               Save
             </button>
             <div className="rounded-md border border-white/10 bg-white/[.035] p-3 text-sm text-slate-300">
@@ -1481,7 +1559,7 @@ function AccessModule({
 }) {
   const [passwordDrafts, setPasswordDrafts] = useState<Record<string, string>>({});
   const [network, setNetwork] = useState("Instagram");
-  const [handle, setHandle] = useState("@aminaofficial");
+  const [handle, setHandle] = useState("@candidatehandle");
   const [staffDraft, setStaffDraft] = useState<StaffMember>({
     name: "New Staff Member",
     email: "staff.member@campaign.local",
@@ -1738,10 +1816,12 @@ function CustomizeModule({
 
 function VoterImportModule({
   uploadedVoterFile,
-  setUploadedVoterFile
+  setUploadedVoterFile,
+  seedDataEnabled
 }: {
   uploadedVoterFile: string;
   setUploadedVoterFile: (file: string) => void;
+  seedDataEnabled: boolean;
 }) {
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.85fr_1.15fr]">
@@ -1767,7 +1847,7 @@ function VoterImportModule({
       </Panel>
       <Panel title="Voter Count Coverage" icon={<Layers size={20} />}>
         <div className="space-y-3">
-          {commandData.voterImports.map((item) => (
+          {(seedDataEnabled ? commandData.voterImports : []).map((item) => (
             <article key={item.fileName} className="rounded-md border border-white/10 bg-white/[.035] p-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -1782,7 +1862,7 @@ function VoterImportModule({
               </div>
             </article>
           ))}
-          {commandData.regions.map((region) => (
+          {(seedDataEnabled ? commandData.regions : []).map((region) => (
             <div key={region.code} className="flex items-center justify-between rounded-md border border-white/10 bg-white/[.025] px-4 py-3">
               <span className="text-sm text-slate-300">{region.name}</span>
               <span className="font-semibold text-white">{region.registeredVoters.toLocaleString()} voters</span>
@@ -1804,6 +1884,15 @@ function PartyModule({
   platformParties: Array<{ name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }>;
 }) {
   const party = platformParties.find((item) => item.abbreviation === selectedParty) ?? platformParties[0];
+  if (!party) {
+    return (
+      <Panel title="Party Influence on Campaign" icon={<Landmark size={20} />}>
+        <div className="rounded-md border border-sky-300/20 bg-sky-300/10 p-4 text-sm leading-7 text-sky-50">
+          No political party has been created yet. The creator must add parties in the creator console before a candidate can select one.
+        </div>
+      </Panel>
+    );
+  }
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.75fr_1.25fr]">
       <Panel title="Candidate Party Selection" icon={<Landmark size={20} />}>

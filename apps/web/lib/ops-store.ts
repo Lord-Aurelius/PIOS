@@ -104,6 +104,7 @@ type OpsState = {
   sentMessages: Array<{ target: string; message: string; channel: string; provider: string }>;
   creatorAccount: CreatorAccount;
   login: (credentials: { userKey: string; username: string; password: string }) => LoginResult;
+  completeExternalLogin: (account: { username: string; role: WorkspaceRole; candidateName?: string }) => void;
   logout: () => void;
   setActiveModule: (activeModule: ModuleKey) => void;
   setSelectedRegion: (region: Region) => void;
@@ -139,7 +140,7 @@ export const useOpsStore = create<OpsState>()(
   persist(
     (set, get) => ({
   isAuthenticated: false,
-  seedDataEnabled: true,
+  seedDataEnabled: false,
   workspaceRole: "candidate",
   activeIdentity: "",
   loginError: "",
@@ -147,43 +148,25 @@ export const useOpsStore = create<OpsState>()(
   selectedRegion: commandData.regions[0],
   generatedBriefing: "",
   fieldDrafts: [],
-  selectedParty: commandData.parties[0].abbreviation,
+  selectedParty: "",
   uploadedVoterFile: "",
-  campaignName: commandData.campaign.name,
-  candidateName: commandData.campaign.candidate,
-  campaignSlogan: commandData.campaign.slogan,
-  brandColor: commandData.parties[0].color,
+  campaignName: "New Campaign Workspace",
+  candidateName: "Unassigned Candidate",
+  campaignSlogan: "Configure this workspace from onboarding.",
+  brandColor: "#38bdf8",
   customVisits: [],
   onboardedCandidates: [],
-  candidateLoginAccounts: [
-    {
-      candidateName: commandData.campaign.candidate,
-      userKey: "AMINA-2027",
-      username: "amina",
-      password: "Candidate123!",
-      status: "Active"
-    }
-  ],
+  candidateLoginAccounts: [],
   deletedCandidateNames: [],
-  candidateStatuses: Object.fromEntries(commandData.candidates.map((candidate) => [candidate.name, candidate.status === "Onboarding" ? "Active" : candidate.status])) as Record<string, "Active" | "Suspended">,
+  candidateStatuses: {},
   passwordEvents: [],
-  staffPasswords: Object.fromEntries(commandData.candidateAccounts.map((account) => [account.username, "Set by candidate"])),
-  socialHandles: commandData.socialHandles,
-  fieldAgents: commandData.fieldAgents,
-  staffMembers: [
-    { name: "Brian Otieno", email: "media.lead@amina.local", phone: "+254711222333", role: "media", access: ["social", "ai", "alerts", "comms"], status: "Active" },
-    { name: "Lydia Njeri", email: "clerk.lead@amina.local", phone: "+254722333444", role: "clerk", access: ["voters", "surveys", "crm", "field"], status: "Active" },
-    { name: "Grace Atieno", email: "field.ops@amina.local", phone: "+254733444555", role: "field", access: ["field", "surveys", "deployment", "comms"], status: "Active" }
-  ],
-  resourceAllocations: commandData.deployments.map((item, index) => ({
-    ...item,
-    contact: ["Grace Atieno", "Brian Otieno", "Lydia Njeri"][index] ?? "Regional logistics lead",
-    recipientName: ["John Kariuki", "Brian Otieno", "Mariam Achieng"][index] ?? "Regional lead",
-    recipientPhone: ["+254711000101", "+254711222333", "+254722000202"][index] ?? "+254700000000",
-    location: item.region
-  })),
+  staffPasswords: {},
+  socialHandles: [],
+  fieldAgents: [],
+  staffMembers: [],
+  resourceAllocations: [],
   meetingAttendees: [],
-  platformParties: commandData.parties,
+  platformParties: [],
   publishedMessages: [],
   sentMessages: [],
   creatorAccount: { userKey: "CREATOR-HQ", username: "creator@pios.local", password: "Creator123!" },
@@ -218,19 +201,30 @@ export const useOpsStore = create<OpsState>()(
     set({
       workspaceRole,
       activeIdentity: account.username,
+      candidateName: candidateAccount?.candidateName ?? get().candidateName,
       isAuthenticated: true,
       loginError: "",
       activeModule: workspaceRole === "creator" ? "creator" : "command"
     });
     return { ok: true, message: "Logged in." };
   },
+  completeExternalLogin: (account) =>
+    set({
+      workspaceRole: account.role,
+      activeIdentity: account.username,
+      candidateName: account.candidateName ?? get().candidateName,
+      isAuthenticated: true,
+      loginError: "",
+      activeModule: account.role === "creator" ? "creator" : "command"
+    }),
   logout: () => set({ isAuthenticated: false, activeModule: "command", workspaceRole: "candidate", activeIdentity: "" }),
   setActiveModule: (activeModule) => set({ activeModule }),
   setSelectedRegion: (selectedRegion) => set({ selectedRegion }),
   generateBriefing: () =>
     set({
-      generatedBriefing:
-        "Executive brief: Nairobi West requires a cost-of-living response within 48 hours. Kibra remains the strongest mobilization opportunity. Embakasi East should receive targeted youth-jobs content and opposition-convoy monitoring."
+      generatedBriefing: get().seedDataEnabled
+        ? "Executive brief: Nairobi West requires a cost-of-living response within 48 hours. Kibra remains the strongest mobilization opportunity. Embakasi East should receive targeted youth-jobs content and opposition-convoy monitoring."
+        : "Executive brief: No live political intelligence has been imported yet. Upload voter data, collect survey responses, connect social handles, or record field activity to generate real campaign insights."
     }),
   addFieldDraft: (draft) => set((state) => ({ fieldDrafts: [draft, ...state.fieldDrafts] })),
   setSelectedParty: (selectedParty) => set({ selectedParty }),
@@ -316,7 +310,6 @@ export const useOpsStore = create<OpsState>()(
   deletePoliticalParty: (abbreviation) =>
     set((state) => {
       const remainingParties = state.platformParties.filter((party) => party.abbreviation !== abbreviation);
-      if (!remainingParties.length) return state;
       return {
         platformParties: remainingParties,
         selectedParty: state.selectedParty === abbreviation ? remainingParties[0]?.abbreviation ?? "" : state.selectedParty,
@@ -362,6 +355,7 @@ export const useOpsStore = create<OpsState>()(
       customVisits: [],
       fieldDrafts: [],
       meetingAttendees: [],
+      platformParties: state.platformParties.filter((party) => !commandData.parties.some((seedParty) => seedParty.abbreviation === party.abbreviation)),
       uploadedVoterFile: "",
       generatedBriefing: "",
       campaignName: "New Campaign Workspace",
@@ -387,11 +381,11 @@ export const useOpsStore = create<OpsState>()(
         brandColor: state.brandColor,
         customVisits: state.customVisits,
         onboardedCandidates: state.onboardedCandidates,
-        candidateLoginAccounts: state.candidateLoginAccounts,
+        candidateLoginAccounts: state.candidateLoginAccounts.map((account) => ({ ...account, password: "" })),
         deletedCandidateNames: state.deletedCandidateNames,
         candidateStatuses: state.candidateStatuses,
         passwordEvents: state.passwordEvents,
-        staffPasswords: state.staffPasswords,
+        staffPasswords: {},
         socialHandles: state.socialHandles,
         fieldAgents: state.fieldAgents,
         staffMembers: state.staffMembers,
@@ -400,18 +394,49 @@ export const useOpsStore = create<OpsState>()(
         platformParties: state.platformParties,
         publishedMessages: state.publishedMessages,
         sentMessages: state.sentMessages,
-        creatorAccount: state.creatorAccount
+        creatorAccount: { ...state.creatorAccount, password: "" }
       }),
       merge: (persistedState, currentState) => {
         const persisted = persistedState as Partial<OpsState>;
-        const seededCandidate = currentState.candidateLoginAccounts[0];
-        const seedDataEnabled = persisted.seedDataEnabled ?? currentState.seedDataEnabled;
+        const wasLegacySeedWorkspace = persisted.seedDataEnabled === true;
+        const demoCandidateNames = new Set(commandData.candidates.map((candidate) => candidate.name));
+        const demoPartyAbbreviations = new Set(commandData.parties.map((party) => party.abbreviation));
+        const seedDataEnabled = false;
         const candidateLoginAccounts = persisted.candidateLoginAccounts?.length
-          ? persisted.candidateLoginAccounts
-          : seedDataEnabled
-            ? [seededCandidate]
-            : [];
-        return { ...currentState, ...persisted, seedDataEnabled, candidateLoginAccounts };
+          ? persisted.candidateLoginAccounts.map((account) => ({ ...account, password: "" }))
+              .filter((account) => !demoCandidateNames.has(account.candidateName))
+          : [];
+        const sanitizedPersisted = wasLegacySeedWorkspace
+          ? {
+              ...persisted,
+              campaignName: currentState.campaignName,
+              candidateName: currentState.candidateName,
+              campaignSlogan: currentState.campaignSlogan,
+              selectedParty: "",
+              customVisits: [],
+              fieldDrafts: [],
+              socialHandles: [],
+              fieldAgents: [],
+              staffMembers: [],
+              resourceAllocations: [],
+              meetingAttendees: [],
+              publishedMessages: [],
+              sentMessages: [],
+              uploadedVoterFile: "",
+              generatedBriefing: "",
+              onboardedCandidates: persisted.onboardedCandidates?.filter((candidate) => !demoCandidateNames.has(candidate.name)) ?? [],
+              platformParties: persisted.platformParties?.filter((party) => !demoPartyAbbreviations.has(party.abbreviation)) ?? [],
+              candidateStatuses: Object.fromEntries(Object.entries(persisted.candidateStatuses ?? {}).filter(([name]) => !demoCandidateNames.has(name))) as Record<string, "Active" | "Suspended">
+            }
+          : persisted;
+        return {
+          ...currentState,
+          ...sanitizedPersisted,
+          seedDataEnabled,
+          creatorAccount: currentState.creatorAccount,
+          staffPasswords: {},
+          candidateLoginAccounts
+        };
       }
     }
   )
