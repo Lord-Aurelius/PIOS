@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
-import { commandData } from "@/lib/production-defaults";
+import { commandData, emptyRegion } from "@/lib/production-defaults";
 import { CandidateLoginAccount, CreatorAccount, InventoryItem, MeetingAttendee, ModuleKey, ResourceAllocation, StaffMember, useOpsStore, WorkspaceRole } from "@/lib/ops-store";
 import {
   defaultSurveyQuestions,
@@ -859,9 +859,10 @@ function SocialModule({
   packagedDataEnabled: boolean;
 }) {
   const [sentiment, setSentiment] = useState("ALL");
-  const [message, setMessage] = useState(packagedDataEnabled ? commandData.mediaStrategies[0].message : "");
-  const [period, setPeriod] = useState(packagedDataEnabled ? commandData.mediaStrategies[0].period : "");
-  const [asset, setAsset] = useState(packagedDataEnabled ? commandData.mediaStrategies[0].assets[0] : "");
+  const firstStrategy = packagedDataEnabled ? commandData.mediaStrategies[0] : undefined;
+  const [message, setMessage] = useState(firstStrategy?.message ?? "");
+  const [period, setPeriod] = useState(firstStrategy?.period ?? "");
+  const [asset, setAsset] = useState(firstStrategy?.assets[0] ?? "");
   const [uploadedAssetPreview, setUploadedAssetPreview] = useState("");
   const posts = packagedDataEnabled ? commandData.posts.filter((post) => sentiment === "ALL" || post.sentiment === sentiment) : [];
   function uploadMediaAsset(event: React.ChangeEvent<HTMLInputElement>) {
@@ -1884,10 +1885,10 @@ function MeetingsModule({
 }) {
   const [name, setName] = useState("Home meeting attendee");
   const [phone, setPhone] = useState("+254700000000");
-  const [location, setLocation] = useState(commandData.regions[0].name);
+  const [location, setLocation] = useState(commandData.regions[0]?.name ?? "");
   const [meetingType, setMeetingType] = useState("Home meeting");
   const [supportScore, setSupportScore] = useState(70);
-  const selectedRegion = commandData.regions.find((region) => region.name === location) ?? commandData.regions[0];
+  const selectedRegion = commandData.regions.find((region) => region.name === location) ?? emptyRegion;
   const rankedAttendees = [...meetingAttendees].sort((a, b) => b.supportScore - a.supportScore);
 
   function addAttendee() {
@@ -1920,7 +1921,9 @@ function MeetingsModule({
         <div className="space-y-3">
           <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Attendee name" className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
           <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="Phone number" className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+          <input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Meeting location or ward" className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
           <select value={location} onChange={(event) => setLocation(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
+            <option value="">Select mapped region when available</option>
             {commandData.regions.map((region) => <option key={region.code}>{region.name}</option>)}
           </select>
           <select value={meetingType} onChange={(event) => setMeetingType(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
