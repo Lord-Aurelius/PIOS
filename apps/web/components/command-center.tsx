@@ -15,6 +15,7 @@ import {
   Landmark,
   Layers,
   LogOut,
+  Menu,
   MapPin,
   Megaphone,
   MessageSquare,
@@ -26,12 +27,13 @@ import {
   Siren,
   Truck,
   UserCog,
-  Users
+  Users,
+  X
 } from "lucide-react";
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { commandData } from "@/lib/production-defaults";
-import { CandidateLoginAccount, CreatorAccount, MeetingAttendee, ModuleKey, ResourceAllocation, StaffMember, useOpsStore, WorkspaceRole } from "@/lib/ops-store";
+import { CandidateLoginAccount, CreatorAccount, InventoryItem, MeetingAttendee, ModuleKey, ResourceAllocation, StaffMember, useOpsStore, WorkspaceRole } from "@/lib/ops-store";
 import {
   defaultSurveyQuestions,
   questionTypes,
@@ -94,6 +96,7 @@ export function CommandCenter() {
     fieldAgents,
     staffMembers,
     resourceAllocations,
+    inventoryItems,
     meetingAttendees,
     platformParties,
     publishedMessages,
@@ -123,13 +126,17 @@ export function CommandCenter() {
     addStaffMember,
     updateStaffAccess,
     addResourceAllocation,
+    addInventoryItem,
     addPoliticalParty,
     deletePoliticalParty,
     publishMessage,
     sendAfricaTalkingMessage,
     updateCreatorAccount,
-    addMeetingAttendee
+    addMeetingAttendee,
+    approvedSurveySlugs,
+    approveSurveyForDashboard
   } = useOpsStore();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [surveyResponses, setSurveyResponses] = useState<SurveyResponse[]>([]);
   useEffect(() => {
     async function loadSurveyResponses() {
@@ -190,7 +197,8 @@ export function CommandCenter() {
   ];
   const candidateMetricSource = packagedDataEnabled ? commandData.metrics : blankCandidateMetrics;
   const visibleMetrics = workspaceRole === "creator" ? creatorClimateMetrics : workspaceRole === "clerk" ? candidateMetricSource.slice(1, 3) : candidateMetricSource;
-  const candidateMetrics = workspaceRole === "creator" ? visibleMetrics : visibleMetrics.map((metric) => (metric.label === "Positive field signals" ? { ...metric, value: String(Number(metric.value) + surveyResponses.length) } : metric));
+  const approvedSurveyResponses = surveyResponses.filter((response) => approvedSurveySlugs.includes(response.slug));
+  const candidateMetrics = workspaceRole === "creator" ? visibleMetrics : visibleMetrics.map((metric) => (metric.label === "Positive field signals" ? { ...metric, value: String(Number(metric.value) + approvedSurveyResponses.length) } : metric));
   const headerTitle = workspaceRole === "creator" ? "House Aurelius PIOS" : candidateName;
   const headerSubtitle =
     workspaceRole === "creator"
@@ -218,6 +226,10 @@ export function CommandCenter() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-sm text-slate-300">
+            <button onClick={() => setMobileMenuOpen(true)} className="flex h-10 items-center gap-2 rounded-md border border-white/10 bg-white/[.04] px-3 hover:bg-white/[.08] lg:hidden">
+              <Menu size={16} />
+              Menu
+            </button>
             <button className="flex h-10 items-center gap-2 rounded-md border border-white/10 bg-white/[.04] px-3 hover:bg-white/[.08]">
               {workspaceSwitcherLabel}
               <ChevronDown size={16} />
@@ -242,6 +254,23 @@ export function CommandCenter() {
         </div>
 
         <ModuleNav activeModule={activeModule} setActiveModule={setActiveModule} workspaceRole={workspaceRole} />
+        {mobileMenuOpen ? (
+          <div className="fixed inset-0 z-50 lg:hidden">
+            <button aria-label="Close menu backdrop" className="absolute inset-0 bg-slate-950/75" onClick={() => setMobileMenuOpen(false)} />
+            <aside className="absolute bottom-0 left-0 top-0 flex w-[86vw] max-w-sm flex-col border-r border-white/10 bg-command-950 p-4 shadow-intel">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase text-sky-200">House Aurelius</p>
+                  <h2 className="text-lg font-semibold text-white">Workspace Menu</h2>
+                </div>
+                <button onClick={() => setMobileMenuOpen(false)} className="flex h-10 w-10 items-center justify-center rounded-md border border-white/10 text-slate-200">
+                  <X size={18} />
+                </button>
+              </div>
+              <ModuleNav activeModule={activeModule} setActiveModule={(module) => { setActiveModule(module); setMobileMenuOpen(false); }} workspaceRole={workspaceRole} mobile />
+            </aside>
+          </div>
+        ) : null}
 
         <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           {candidateMetrics.map((metric) => (
@@ -289,18 +318,20 @@ export function CommandCenter() {
           <SocialModule publishedMessages={publishedMessages} publishMessage={publishMessage} packagedDataEnabled={packagedDataEnabled} />
         ) : null}
         {activeModule === "ai" ? (
-          <AiModule generatedBriefing={generatedBriefing} generateBriefing={generateBriefing} surveyResponses={surveyResponses} packagedDataEnabled={packagedDataEnabled} />
+          <AiModule generatedBriefing={generatedBriefing} generateBriefing={generateBriefing} surveyResponses={approvedSurveyResponses} packagedDataEnabled={packagedDataEnabled} />
         ) : null}
         {activeModule === "crm" ? <CrmModule selectedParty={selectedParty} platformParties={platformParties} meetingAttendees={meetingAttendees} /> : null}
-        {activeModule === "surveys" ? <SurveyModule surveyResponses={surveyResponses} /> : null}
-        {activeModule === "alerts" ? <AlertsModule surveyResponses={surveyResponses} packagedDataEnabled={packagedDataEnabled} /> : null}
+        {activeModule === "surveys" ? <SurveyModule surveyResponses={surveyResponses} approvedSurveySlugs={approvedSurveySlugs} approveSurveyForDashboard={approveSurveyForDashboard} /> : null}
+        {activeModule === "alerts" ? <AlertsModule surveyResponses={approvedSurveyResponses} packagedDataEnabled={packagedDataEnabled} /> : null}
         {activeModule === "deployment" ? (
           <DeploymentModule
             resourceAllocations={resourceAllocations}
+            inventoryItems={inventoryItems}
             addResourceAllocation={addResourceAllocation}
             sendAfricaTalkingMessage={sendAfricaTalkingMessage}
           />
         ) : null}
+        {activeModule === "inventory" ? <InventoryModule inventoryItems={inventoryItems} addInventoryItem={addInventoryItem} /> : null}
         {activeModule === "voters" ? (
           <VoterImportModule uploadedVoterFile={uploadedVoterFile} setUploadedVoterFile={setUploadedVoterFile} packagedDataEnabled={packagedDataEnabled} />
         ) : null}
@@ -457,11 +488,13 @@ function LoginScreen({
 function ModuleNav({
   activeModule,
   setActiveModule,
-  workspaceRole
+  workspaceRole,
+  mobile = false
 }: {
   activeModule: ModuleKey;
   setActiveModule: (module: ModuleKey) => void;
   workspaceRole: WorkspaceRole;
+  mobile?: boolean;
 }) {
   const allModules: Array<{ key: ModuleKey; label: string; icon: React.ReactNode; roles?: WorkspaceRole[] }> = [
     { key: "creator", label: "Creator", icon: <UserCog size={16} />, roles: ["creator"] },
@@ -474,6 +507,7 @@ function ModuleNav({
     { key: "comms", label: "Comms", icon: <MessageSquare size={16} />, roles: ["candidate", "media", "clerk", "field"] },
     { key: "alerts", label: "Alerts", icon: <Siren size={16} />, roles: ["candidate", "media"] },
     { key: "deployment", label: "Resources", icon: <Truck size={16} />, roles: ["candidate", "field"] },
+    { key: "inventory", label: "Inventory", icon: <Database size={16} />, roles: ["candidate", "clerk", "field"] },
     { key: "voters", label: "Voters", icon: <Database size={16} />, roles: ["candidate", "clerk"] },
     { key: "party", label: "Party", icon: <Landmark size={16} />, roles: ["candidate"] },
     { key: "access", label: "Access", icon: <Users size={16} />, roles: ["candidate"] },
@@ -483,7 +517,7 @@ function ModuleNav({
   const modules = allModules.filter((module) => module.roles?.includes(workspaceRole) ?? true);
 
   return (
-    <nav className="grid grid-cols-2 gap-2 sm:grid-cols-5 xl:grid-cols-10">
+    <nav className={mobile ? "grid gap-2 overflow-y-auto" : "hidden gap-2 lg:grid lg:grid-cols-5 xl:grid-cols-10"}>
       {modules.map((module) => (
         <button
           key={module.key}
@@ -979,7 +1013,15 @@ function CrmModule({
   );
 }
 
-function SurveyModule({ surveyResponses }: { surveyResponses: SurveyResponse[] }) {
+function SurveyModule({
+  surveyResponses,
+  approvedSurveySlugs,
+  approveSurveyForDashboard
+}: {
+  surveyResponses: SurveyResponse[];
+  approvedSurveySlugs: string[];
+  approveSurveyForDashboard: (slug: string) => void;
+}) {
   const [baseUrl, setBaseUrl] = useState("http://localhost:3000/survey");
   const surveyTemplates = Object.keys(defaultSurveyQuestions).map((slug) => ({
     name: slug.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
@@ -1043,9 +1085,23 @@ function SurveyModule({ surveyResponses }: { surveyResponses: SurveyResponse[] }
     });
   }
   const selectedResponses = surveyResponses.filter((response) => response.slug === selectedSlug);
+  const selectedApproved = approvedSurveySlugs.includes(selectedSlug);
+  const answerSummary = useMemo(() => {
+    const totals: Record<string, Record<string, number>> = {};
+    selectedResponses.forEach((response) => {
+      Object.entries(response.answers).forEach(([key, value]) => {
+        const values = Array.isArray(value) ? value : [value];
+        values.filter(Boolean).forEach((entry) => {
+          totals[key] = totals[key] ?? {};
+          totals[key][String(entry)] = (totals[key][String(entry)] ?? 0) + 1;
+        });
+      });
+    });
+    return totals;
+  }, [selectedResponses]);
 
   return (
-    <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.95fr_1.05fr]">
+    <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.8fr_1.2fr]">
       <Panel title="Polling & Survey Engine" icon={<FileText size={20} />}>
         <div className="grid gap-3">
           {surveyTemplates.map((survey) => (
@@ -1073,6 +1129,47 @@ function SurveyModule({ surveyResponses }: { surveyResponses: SurveyResponse[] }
           ))}
         </div>
       </Panel>
+      <Panel title="Survey Findings Review" icon={<Activity size={20} />}>
+        <div className="mb-4 grid gap-3 sm:grid-cols-3">
+          <MetricMini label="Responses under review" value={String(selectedResponses.length)} />
+          <MetricMini label="Questions" value={String(questions.length)} />
+          <MetricMini label="Dashboard status" value={selectedApproved ? "Approved" : "Held"} />
+        </div>
+        <div className="rounded-md border border-white/10 bg-white/[.035] p-3 text-sm leading-6 text-slate-300">
+          Survey results stay in review until the candidate or clerk approves them. Only approved surveys feed AI briefings, alerts, and dashboard signal counts.
+        </div>
+        <div className="mt-4 grid gap-3">
+          {Object.entries(answerSummary).map(([questionId, counts]) => {
+            const question = questions.find((item) => item.id === questionId);
+            return (
+              <article key={questionId} className="rounded-md border border-white/10 bg-slate-950/35 p-4">
+                <h3 className="font-semibold text-white">{question?.label ?? questionId}</h3>
+                <div className="mt-3 space-y-2">
+                  {Object.entries(counts).slice(0, 8).map(([answer, count]) => (
+                    <div key={answer} className="grid grid-cols-[1fr_auto] gap-3 text-sm">
+                      <span className="truncate text-slate-300">{answer}</span>
+                      <span className="font-semibold text-sky-100">{count}</span>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            );
+          })}
+          {!selectedResponses.length ? (
+            <div className="rounded-md border border-white/10 bg-white/[.035] p-4 text-sm leading-6 text-slate-300">
+              No responses have been submitted for this survey yet. Share the QR link with field agents, then review the findings here before approving dashboard use.
+            </div>
+          ) : null}
+        </div>
+        <button
+          onClick={() => approveSurveyForDashboard(selectedSlug)}
+          disabled={!selectedResponses.length || selectedApproved}
+          className="mt-4 h-11 w-full rounded-md bg-sky-300 font-semibold text-slate-950 hover:bg-sky-200 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {selectedApproved ? "Approved for AI Dashboards" : "Approve Survey for AI Dashboards"}
+        </button>
+      </Panel>
+      <div className="xl:col-span-2">
       <Panel title="Questionnaire Builder" icon={<QrCode size={20} />}>
         <div className="mb-4 rounded-md border border-sky-300/20 bg-sky-300/10 p-3 text-sm leading-6 text-sky-50">
           Editing questions here changes the public survey form in this browser. In production, these edits would save through the survey API and generate a permanent QR link.
@@ -1121,6 +1218,7 @@ function SurveyModule({ surveyResponses }: { surveyResponses: SurveyResponse[] }
           </button>
         </div>
       </Panel>
+      </div>
     </section>
   );
 }
@@ -1162,10 +1260,12 @@ function AlertsModule({ surveyResponses, packagedDataEnabled }: { surveyResponse
 
 function DeploymentModule({
   resourceAllocations,
+  inventoryItems,
   addResourceAllocation,
   sendAfricaTalkingMessage
 }: {
   resourceAllocations: ResourceAllocation[];
+  inventoryItems: InventoryItem[];
   addResourceAllocation: (allocation: ResourceAllocation) => void;
   sendAfricaTalkingMessage: (message: { target: string; message: string; channel: string }) => void;
 }) {
@@ -1183,11 +1283,22 @@ function DeploymentModule({
       }, {}),
     [resourceAllocations]
   );
+  const inventoryByName = useMemo(
+    () =>
+      inventoryItems.reduce<Record<string, number>>((totals, item) => {
+        totals[item.name] = (totals[item.name] ?? 0) + item.quantity;
+        return totals;
+      }, {}),
+    [inventoryItems]
+  );
 
   return (
     <Panel title="Resource Deployment" icon={<Truck size={20} />}>
       <div className="mb-4 grid gap-2 lg:grid-cols-[1fr_1fr_110px_1fr_1fr_1fr_auto]">
-        <input value={resource} onChange={(event) => setResource(event.target.value)} placeholder="Resource" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+        <select value={resource} onChange={(event) => setResource(event.target.value)} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
+          <option>{resource}</option>
+          {inventoryItems.map((item) => <option key={`${item.name}-${item.location}`} value={item.name}>{item.name}</option>)}
+        </select>
         <input value={resourceRegion} onChange={(event) => setResourceRegion(event.target.value)} placeholder="Region" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
         <input value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} type="number" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
         <input value={recipientName} onChange={(event) => setRecipientName(event.target.value)} placeholder="Recipient name" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
@@ -1205,7 +1316,9 @@ function DeploymentModule({
           <section key={resourceName} className="rounded-md border border-white/10 bg-white/[.025] p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <h3 className="font-semibold text-white">{resourceName}</h3>
-              <span className="text-sm text-sky-100">{allocations.length} recipients / {allocations.reduce((sum, item) => sum + item.quantity, 0)} units</span>
+              <span className="text-sm text-sky-100">
+                {allocations.length} recipients / {allocations.reduce((sum, item) => sum + item.quantity, 0)} units used / {inventoryByName[resourceName] ?? 0} in inventory
+              </span>
             </div>
             <div className="mt-3 grid gap-3 lg:grid-cols-2">
               {allocations.map((deployment) => (
@@ -1232,8 +1345,82 @@ function DeploymentModule({
             </div>
           </section>
         ))}
+        {!resourceAllocations.length ? (
+          <div className="rounded-md border border-white/10 bg-white/[.035] p-4 text-sm leading-6 text-slate-300">
+            No resource allocations have been recorded yet. Add campaign supplies in Inventory first, then allocate them here for transparency.
+          </div>
+        ) : null}
       </div>
     </Panel>
+  );
+}
+
+function InventoryModule({
+  inventoryItems,
+  addInventoryItem
+}: {
+  inventoryItems: InventoryItem[];
+  addInventoryItem: (item: InventoryItem) => void;
+}) {
+  const [draft, setDraft] = useState<InventoryItem>({
+    name: "Volunteer kits",
+    category: "Field supplies",
+    quantity: 0,
+    unit: "units",
+    location: "Main campaign office",
+    custodian: "Operations lead",
+    status: "Available"
+  });
+  const totals = useMemo(
+    () =>
+      inventoryItems.reduce<Record<string, number>>((groups, item) => {
+        groups[item.category] = (groups[item.category] ?? 0) + item.quantity;
+        return groups;
+      }, {}),
+    [inventoryItems]
+  );
+  return (
+    <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.8fr_1.2fr]">
+      <Panel title="Campaign Inventory Intake" icon={<Database size={20} />}>
+        <div className="space-y-3">
+          <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Resource name" className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} placeholder="Category" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <input value={draft.quantity} onChange={(event) => setDraft({ ...draft, quantity: Number(event.target.value) })} type="number" placeholder="Quantity" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <input value={draft.unit} onChange={(event) => setDraft({ ...draft, unit: event.target.value })} placeholder="Unit" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <input value={draft.location} onChange={(event) => setDraft({ ...draft, location: event.target.value })} placeholder="Storage location" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <input value={draft.custodian} onChange={(event) => setDraft({ ...draft, custodian: event.target.value })} placeholder="Custodian" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value })} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
+              <option>Available</option>
+              <option>Reserved</option>
+              <option>Needs audit</option>
+            </select>
+          </div>
+          <button onClick={() => addInventoryItem(draft)} className="h-11 w-full rounded-md bg-sky-300 font-semibold text-slate-950 hover:bg-sky-200">
+            Add Inventory Item
+          </button>
+        </div>
+      </Panel>
+      <Panel title="Inventory Ledger" icon={<Layers size={20} />}>
+        <div className="mb-4 grid gap-3 sm:grid-cols-3">
+          {Object.entries(totals).map(([category, quantity]) => <MetricMini key={category} label={category} value={String(quantity)} />)}
+          {!Object.keys(totals).length ? <MetricMini label="Inventory records" value="0" /> : null}
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          {inventoryItems.map((item, index) => (
+            <article key={`${item.name}-${item.location}-${index}`} className="rounded-md border border-white/10 bg-white/[.035] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="font-semibold text-white">{item.name}</h3>
+                <span className="text-xs text-sky-100">{item.status}</span>
+              </div>
+              <p className="mt-2 text-sm text-slate-300">{item.quantity} {item.unit} / {item.category}</p>
+              <p className="mt-2 text-sm text-slate-400">{item.location}</p>
+              <p className="mt-2 text-xs text-slate-500">Custodian: {item.custodian}</p>
+            </article>
+          ))}
+        </div>
+      </Panel>
+    </section>
   );
 }
 

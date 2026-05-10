@@ -13,6 +13,7 @@ export type ModuleKey =
   | "surveys"
   | "alerts"
   | "deployment"
+  | "inventory"
   | "voters"
   | "party"
   | "access"
@@ -38,6 +39,16 @@ export type ResourceAllocation = {
   recipientName: string;
   recipientPhone: string;
   location: string;
+  status: string;
+};
+
+export type InventoryItem = {
+  name: string;
+  category: string;
+  quantity: number;
+  unit: string;
+  location: string;
+  custodian: string;
   status: string;
 };
 
@@ -98,6 +109,7 @@ type OpsState = {
   fieldAgents: Array<{ name: string; phone: string; pollingStation: string; ward: string; status: string }>;
   staffMembers: StaffMember[];
   resourceAllocations: ResourceAllocation[];
+  inventoryItems: InventoryItem[];
   meetingAttendees: MeetingAttendee[];
   platformParties: Array<{ name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }>;
   publishedMessages: Array<{ message: string; period: string; channels: string[]; asset: string }>;
@@ -127,12 +139,15 @@ type OpsState = {
   addStaffMember: (member: StaffMember) => void;
   updateStaffAccess: (email: string, access: ModuleKey[]) => void;
   addResourceAllocation: (allocation: ResourceAllocation) => void;
+  addInventoryItem: (item: InventoryItem) => void;
   addPoliticalParty: (party: { name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }) => void;
   deletePoliticalParty: (abbreviation: string) => void;
   publishMessage: (message: { message: string; period: string; channels: string[]; asset: string }) => void;
   sendAfricaTalkingMessage: (message: { target: string; message: string; channel: string }) => void;
   updateCreatorAccount: (account: CreatorAccount) => void;
   addMeetingAttendee: (attendee: Omit<MeetingAttendee, "attendedAt">) => void;
+  approvedSurveySlugs: string[];
+  approveSurveyForDashboard: (slug: string) => void;
   clearPackagedData: () => void;
 };
 
@@ -165,6 +180,7 @@ export const useOpsStore = create<OpsState>()(
   fieldAgents: [],
   staffMembers: [],
   resourceAllocations: [],
+  inventoryItems: [],
   meetingAttendees: [],
   platformParties: [],
   publishedMessages: [],
@@ -306,6 +322,7 @@ export const useOpsStore = create<OpsState>()(
     })),
   addResourceAllocation: (allocation) =>
     set((state) => ({ resourceAllocations: [allocation, ...state.resourceAllocations] })),
+  addInventoryItem: (item) => set((state) => ({ inventoryItems: [item, ...state.inventoryItems] })),
   addPoliticalParty: (party) => set((state) => ({ platformParties: [party, ...state.platformParties] })),
   deletePoliticalParty: (abbreviation) =>
     set((state) => {
@@ -340,6 +357,11 @@ export const useOpsStore = create<OpsState>()(
         ...state.meetingAttendees
       ]
     })),
+  approvedSurveySlugs: [],
+  approveSurveyForDashboard: (slug) =>
+    set((state) => ({
+      approvedSurveySlugs: state.approvedSurveySlugs.includes(slug) ? state.approvedSurveySlugs : [...state.approvedSurveySlugs, slug]
+    })),
   clearPackagedData: () =>
     set((state) => ({
       packagedDataEnabled: false,
@@ -349,6 +371,7 @@ export const useOpsStore = create<OpsState>()(
       staffMembers: [],
       staffPasswords: {},
       resourceAllocations: [],
+      inventoryItems: [],
       socialHandles: [],
       publishedMessages: [],
       sentMessages: [],
@@ -390,7 +413,9 @@ export const useOpsStore = create<OpsState>()(
         fieldAgents: state.fieldAgents,
         staffMembers: state.staffMembers,
         resourceAllocations: state.resourceAllocations,
+        inventoryItems: state.inventoryItems,
         meetingAttendees: state.meetingAttendees,
+        approvedSurveySlugs: state.approvedSurveySlugs,
         platformParties: state.platformParties,
         publishedMessages: state.publishedMessages,
         sentMessages: state.sentMessages,
@@ -419,6 +444,7 @@ export const useOpsStore = create<OpsState>()(
               fieldAgents: [],
               staffMembers: [],
               resourceAllocations: [],
+              inventoryItems: [],
               meetingAttendees: [],
               publishedMessages: [],
               sentMessages: [],
@@ -435,6 +461,7 @@ export const useOpsStore = create<OpsState>()(
           packagedDataEnabled,
           creatorAccount: currentState.creatorAccount,
           staffPasswords: {},
+          approvedSurveySlugs: sanitizedPersisted.approvedSurveySlugs ?? [],
           candidateLoginAccounts
         };
       }
