@@ -8,8 +8,10 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "db:generate": "pnpm --filter @pios/database prisma:generate",
-    "db:migrate": "pnpm --filter @pios/database prisma:migrate",
-    "db:seed": "pnpm --filter @pios/database seed"
+    "db:migrate": "pnpm --filter @pios/database prisma:migrate"
+  },
+  "prisma": {
+    "schema": "packages/database/prisma/schema.prisma"
   },
   "devDependencies": {
     "next": "^15.0.3",

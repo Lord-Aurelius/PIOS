@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { commandData } from "./demo-data";
+import { commandData, emptyRegion } from "./production-defaults";
 
 export type Region = (typeof commandData.regions)[number];
 export type ModuleKey =
@@ -73,7 +73,7 @@ export type LoginResult = {
 
 type OpsState = {
   isAuthenticated: boolean;
-  seedDataEnabled: boolean;
+  packagedDataEnabled: boolean;
   workspaceRole: WorkspaceRole;
   activeIdentity: string;
   loginError: string;
@@ -133,19 +133,19 @@ type OpsState = {
   sendAfricaTalkingMessage: (message: { target: string; message: string; channel: string }) => void;
   updateCreatorAccount: (account: CreatorAccount) => void;
   addMeetingAttendee: (attendee: Omit<MeetingAttendee, "attendedAt">) => void;
-  clearSeedData: () => void;
+  clearPackagedData: () => void;
 };
 
 export const useOpsStore = create<OpsState>()(
   persist(
     (set, get) => ({
   isAuthenticated: false,
-  seedDataEnabled: false,
+  packagedDataEnabled: false,
   workspaceRole: "candidate",
   activeIdentity: "",
   loginError: "",
   activeModule: "command",
-  selectedRegion: commandData.regions[0],
+  selectedRegion: emptyRegion,
   generatedBriefing: "",
   fieldDrafts: [],
   selectedParty: "",
@@ -222,7 +222,7 @@ export const useOpsStore = create<OpsState>()(
   setSelectedRegion: (selectedRegion) => set({ selectedRegion }),
   generateBriefing: () =>
     set({
-      generatedBriefing: get().seedDataEnabled
+      generatedBriefing: get().packagedDataEnabled
         ? "Executive brief: Nairobi West requires a cost-of-living response within 48 hours. Kibra remains the strongest mobilization opportunity. Embakasi East should receive targeted youth-jobs content and opposition-convoy monitoring."
         : "Executive brief: No live political intelligence has been imported yet. Upload voter data, collect survey responses, connect social handles, or record field activity to generate real campaign insights."
     }),
@@ -340,9 +340,9 @@ export const useOpsStore = create<OpsState>()(
         ...state.meetingAttendees
       ]
     })),
-  clearSeedData: () =>
+  clearPackagedData: () =>
     set((state) => ({
-      seedDataEnabled: false,
+      packagedDataEnabled: false,
       candidateLoginAccounts: state.candidateLoginAccounts.filter((account) => account.candidateName !== commandData.campaign.candidate),
       deletedCandidateNames: commandData.candidates.map((candidate) => candidate.name),
       fieldAgents: [],
@@ -355,7 +355,7 @@ export const useOpsStore = create<OpsState>()(
       customVisits: [],
       fieldDrafts: [],
       meetingAttendees: [],
-      platformParties: state.platformParties.filter((party) => !commandData.parties.some((seedParty) => seedParty.abbreviation === party.abbreviation)),
+      platformParties: state.platformParties.filter((party) => !commandData.parties.some((packagedParty) => packagedParty.abbreviation === party.abbreviation)),
       uploadedVoterFile: "",
       generatedBriefing: "",
       campaignName: "New Campaign Workspace",
@@ -365,11 +365,11 @@ export const useOpsStore = create<OpsState>()(
     }))
     }),
     {
-      name: "pios-ops-state",
+      name: "pios-live-state",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         isAuthenticated: state.isAuthenticated,
-        seedDataEnabled: state.seedDataEnabled,
+        packagedDataEnabled: state.packagedDataEnabled,
         workspaceRole: state.workspaceRole,
         activeIdentity: state.activeIdentity,
         activeModule: state.activeModule,
@@ -398,15 +398,15 @@ export const useOpsStore = create<OpsState>()(
       }),
       merge: (persistedState, currentState) => {
         const persisted = persistedState as Partial<OpsState>;
-        const wasLegacySeedWorkspace = persisted.seedDataEnabled === true;
-        const demoCandidateNames = new Set(commandData.candidates.map((candidate) => candidate.name));
-        const demoPartyAbbreviations = new Set(commandData.parties.map((party) => party.abbreviation));
-        const seedDataEnabled = false;
+        const wasPackagedWorkspace = persisted.packagedDataEnabled === true;
+        const packagedCandidateNames = new Set(commandData.candidates.map((candidate) => candidate.name));
+        const packagedPartyAbbreviations = new Set(commandData.parties.map((party) => party.abbreviation));
+        const packagedDataEnabled = false;
         const candidateLoginAccounts = persisted.candidateLoginAccounts?.length
           ? persisted.candidateLoginAccounts.map((account) => ({ ...account, password: "" }))
-              .filter((account) => !demoCandidateNames.has(account.candidateName))
+              .filter((account) => !packagedCandidateNames.has(account.candidateName))
           : [];
-        const sanitizedPersisted = wasLegacySeedWorkspace
+        const sanitizedPersisted = wasPackagedWorkspace
           ? {
               ...persisted,
               campaignName: currentState.campaignName,
@@ -424,15 +424,15 @@ export const useOpsStore = create<OpsState>()(
               sentMessages: [],
               uploadedVoterFile: "",
               generatedBriefing: "",
-              onboardedCandidates: persisted.onboardedCandidates?.filter((candidate) => !demoCandidateNames.has(candidate.name)) ?? [],
-              platformParties: persisted.platformParties?.filter((party) => !demoPartyAbbreviations.has(party.abbreviation)) ?? [],
-              candidateStatuses: Object.fromEntries(Object.entries(persisted.candidateStatuses ?? {}).filter(([name]) => !demoCandidateNames.has(name))) as Record<string, "Active" | "Suspended">
+              onboardedCandidates: persisted.onboardedCandidates?.filter((candidate) => !packagedCandidateNames.has(candidate.name)) ?? [],
+              platformParties: persisted.platformParties?.filter((party) => !packagedPartyAbbreviations.has(party.abbreviation)) ?? [],
+              candidateStatuses: Object.fromEntries(Object.entries(persisted.candidateStatuses ?? {}).filter(([name]) => !packagedCandidateNames.has(name))) as Record<string, "Active" | "Suspended">
             }
           : persisted;
         return {
           ...currentState,
           ...sanitizedPersisted,
-          seedDataEnabled,
+          packagedDataEnabled,
           creatorAccount: currentState.creatorAccount,
           staffPasswords: {},
           candidateLoginAccounts

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { commandData } from "@/lib/demo-data";
 import {
   defaultSurveyQuestions,
   storageKeyForSurveyResponses,
@@ -10,13 +9,17 @@ import {
 } from "@/lib/survey-questions";
 
 export function PublicSurveyForm({ slug }: { slug: string }) {
-  const survey = commandData.surveys.find((item) => item.slug === slug) ?? commandData.surveys[0];
-  const [questions, setQuestions] = useState<SurveyQuestion[]>(defaultSurveyQuestions[survey.slug]);
+  const survey = {
+    slug,
+    name: slug.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+    target: "Field collection"
+  };
+  const [questions, setQuestions] = useState<SurveyQuestion[]>(defaultSurveyQuestions[survey.slug] ?? defaultSurveyQuestions["cost-of-living-pulse"]);
   const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKeyForSurvey(survey.slug));
-    setQuestions(saved ? JSON.parse(saved) : defaultSurveyQuestions[survey.slug]);
+    setQuestions(saved ? JSON.parse(saved) : (defaultSurveyQuestions[survey.slug] ?? defaultSurveyQuestions["cost-of-living-pulse"]));
   }, [survey.slug]);
 
   async function submitSurvey(event: React.FormEvent<HTMLFormElement>) {

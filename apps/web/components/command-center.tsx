@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
-import { commandData } from "@/lib/demo-data";
+import { commandData } from "@/lib/production-defaults";
 import { CandidateLoginAccount, CreatorAccount, MeetingAttendee, ModuleKey, ResourceAllocation, StaffMember, useOpsStore, WorkspaceRole } from "@/lib/ops-store";
 import {
   defaultSurveyQuestions,
@@ -69,7 +69,7 @@ function regionMapStyle(region: (typeof commandData.regions)[number], selected: 
 export function CommandCenter() {
   const {
     isAuthenticated,
-    seedDataEnabled,
+    packagedDataEnabled,
     workspaceRole,
     activeIdentity,
     loginError,
@@ -128,14 +128,14 @@ export function CommandCenter() {
     publishMessage,
     sendAfricaTalkingMessage,
     updateCreatorAccount,
-    addMeetingAttendee,
-    clearSeedData
+    addMeetingAttendee
   } = useOpsStore();
   const [surveyResponses, setSurveyResponses] = useState<SurveyResponse[]>([]);
   useEffect(() => {
     async function loadSurveyResponses() {
-      const responses = commandData.surveys.flatMap((survey) => {
-        const saved = window.localStorage.getItem(storageKeyForSurveyResponses(survey.slug));
+      const localSurveySlugs = Object.keys(defaultSurveyQuestions);
+      const responses = localSurveySlugs.flatMap((slug) => {
+        const saved = window.localStorage.getItem(storageKeyForSurveyResponses(slug));
         return saved ? (JSON.parse(saved) as SurveyResponse[]) : [];
       });
       const apiBase = process.env.NEXT_PUBLIC_API_URL;
@@ -164,22 +164,22 @@ export function CommandCenter() {
   }, []);
   const selectedSignals = useMemo(
     () =>
-      seedDataEnabled
+      packagedDataEnabled
         ? commandData.posts.filter((signal) => signal.region.name === selectedRegion.name).length +
           commandData.reports.filter((report) => report.region.name === selectedRegion.name).length
         : 0,
-    [seedDataEnabled, selectedRegion]
+    [packagedDataEnabled, selectedRegion]
   );
 
   if (!isAuthenticated) {
     return <LoginScreen login={login} completeExternalLogin={completeExternalLogin} loginError={loginError} />;
   }
 
-  const seedCandidates = seedDataEnabled ? commandData.candidates.filter((candidate) => !deletedCandidateNames.includes(candidate.name)) : [];
+  const packagedCandidates = packagedDataEnabled ? commandData.candidates.filter((candidate) => !deletedCandidateNames.includes(candidate.name)) : [];
   const creatorClimateMetrics = [
-    { label: "Tracked candidates", value: String([...onboardedCandidates, ...seedCandidates].length), change: 12, tone: "positive" },
+    { label: "Tracked candidates", value: String([...onboardedCandidates, ...packagedCandidates].length), change: 12, tone: "positive" },
     { label: "Regions monitored", value: String(commandData.regions.length), change: 4, tone: "neutral" },
-    { label: "Platform access users", value: String((seedDataEnabled ? commandData.candidateAccounts.length : 0) + candidateLoginAccounts.length + staffMembers.length), change: 9, tone: "positive" },
+    { label: "Platform access users", value: String((packagedDataEnabled ? commandData.candidateAccounts.length : 0) + candidateLoginAccounts.length + staffMembers.length), change: 9, tone: "positive" },
     { label: "Climate risk index", value: "Medium", change: -3, tone: "neutral" }
   ];
   const blankCandidateMetrics = [
@@ -188,7 +188,7 @@ export function CommandCenter() {
     { label: "Negative social spikes", value: "0", change: 0, tone: "neutral" },
     { label: "Priority swing areas", value: "0", change: 0, tone: "neutral" }
   ];
-  const candidateMetricSource = seedDataEnabled ? commandData.metrics : blankCandidateMetrics;
+  const candidateMetricSource = packagedDataEnabled ? commandData.metrics : blankCandidateMetrics;
   const visibleMetrics = workspaceRole === "creator" ? creatorClimateMetrics : workspaceRole === "clerk" ? candidateMetricSource.slice(1, 3) : candidateMetricSource;
   const candidateMetrics = workspaceRole === "creator" ? visibleMetrics : visibleMetrics.map((metric) => (metric.label === "Positive field signals" ? { ...metric, value: String(Number(metric.value) + surveyResponses.length) } : metric));
   const headerTitle = workspaceRole === "creator" ? "House Aurelius PIOS" : candidateName;
@@ -261,7 +261,7 @@ export function CommandCenter() {
           ))}
         </section>
 
-        {activeModule === "command" && workspaceRole === "creator" ? <CreatorClimateModule seedDataEnabled={seedDataEnabled} onboardedCandidates={onboardedCandidates} /> : null}
+        {activeModule === "command" && workspaceRole === "creator" ? <CreatorClimateModule packagedDataEnabled={packagedDataEnabled} onboardedCandidates={onboardedCandidates} /> : null}
         {activeModule === "command" && workspaceRole !== "creator" ? (
           <CommandModule
             selectedRegion={selectedRegion}
@@ -269,7 +269,7 @@ export function CommandCenter() {
             setSelectedRegion={setSelectedRegion}
             customVisits={customVisits}
             meetingAttendees={meetingAttendees}
-            seedDataEnabled={seedDataEnabled}
+            packagedDataEnabled={packagedDataEnabled}
             addVisitToSelectedRegion={addVisitToSelectedRegion}
           />
         ) : null}
@@ -282,18 +282,18 @@ export function CommandCenter() {
             addFieldAgent={addFieldAgent}
             updateFieldAgent={updateFieldAgent}
             deleteFieldAgent={deleteFieldAgent}
-            seedDataEnabled={seedDataEnabled}
+            packagedDataEnabled={packagedDataEnabled}
           />
         ) : null}
         {activeModule === "social" ? (
-          <SocialModule publishedMessages={publishedMessages} publishMessage={publishMessage} seedDataEnabled={seedDataEnabled} />
+          <SocialModule publishedMessages={publishedMessages} publishMessage={publishMessage} packagedDataEnabled={packagedDataEnabled} />
         ) : null}
         {activeModule === "ai" ? (
-          <AiModule generatedBriefing={generatedBriefing} generateBriefing={generateBriefing} surveyResponses={surveyResponses} seedDataEnabled={seedDataEnabled} />
+          <AiModule generatedBriefing={generatedBriefing} generateBriefing={generateBriefing} surveyResponses={surveyResponses} packagedDataEnabled={packagedDataEnabled} />
         ) : null}
-        {activeModule === "crm" ? <CrmModule /> : null}
+        {activeModule === "crm" ? <CrmModule selectedParty={selectedParty} platformParties={platformParties} meetingAttendees={meetingAttendees} /> : null}
         {activeModule === "surveys" ? <SurveyModule surveyResponses={surveyResponses} /> : null}
-        {activeModule === "alerts" ? <AlertsModule surveyResponses={surveyResponses} seedDataEnabled={seedDataEnabled} /> : null}
+        {activeModule === "alerts" ? <AlertsModule surveyResponses={surveyResponses} packagedDataEnabled={packagedDataEnabled} /> : null}
         {activeModule === "deployment" ? (
           <DeploymentModule
             resourceAllocations={resourceAllocations}
@@ -302,7 +302,7 @@ export function CommandCenter() {
           />
         ) : null}
         {activeModule === "voters" ? (
-          <VoterImportModule uploadedVoterFile={uploadedVoterFile} setUploadedVoterFile={setUploadedVoterFile} seedDataEnabled={seedDataEnabled} />
+          <VoterImportModule uploadedVoterFile={uploadedVoterFile} setUploadedVoterFile={setUploadedVoterFile} packagedDataEnabled={packagedDataEnabled} />
         ) : null}
         {activeModule === "party" ? (
           <PartyModule selectedParty={selectedParty} setSelectedParty={setSelectedParty} platformParties={platformParties} />
@@ -323,8 +323,7 @@ export function CommandCenter() {
             platformParties={platformParties}
             creatorAccount={creatorAccount}
             updateCreatorAccount={updateCreatorAccount}
-            seedDataEnabled={seedDataEnabled}
-            clearSeedData={clearSeedData}
+            packagedDataEnabled={packagedDataEnabled}
           />
         ) : null}
         {activeModule === "access" ? (
@@ -470,7 +469,7 @@ function ModuleNav({
     { key: "field", label: "Field", icon: <ClipboardList size={16} />, roles: ["candidate", "clerk", "field"] },
     { key: "social", label: "Social", icon: <Megaphone size={16} />, roles: ["candidate", "media"] },
     { key: "ai", label: "AI", icon: <BrainCircuit size={16} />, roles: ["candidate", "media"] },
-    { key: "crm", label: "CRM", icon: <Handshake size={16} />, roles: ["candidate", "clerk"] },
+    { key: "crm", label: "Contacts", icon: <Handshake size={16} />, roles: ["candidate", "clerk"] },
     { key: "surveys", label: "Surveys", icon: <FileText size={16} />, roles: ["candidate", "clerk", "field"] },
     { key: "comms", label: "Comms", icon: <MessageSquare size={16} />, roles: ["candidate", "media", "clerk", "field"] },
     { key: "alerts", label: "Alerts", icon: <Siren size={16} />, roles: ["candidate", "media"] },
@@ -510,7 +509,7 @@ function CommandModule({
   setSelectedRegion,
   customVisits,
   meetingAttendees,
-  seedDataEnabled,
+  packagedDataEnabled,
   addVisitToSelectedRegion
 }: {
   selectedRegion: (typeof commandData.regions)[number];
@@ -518,14 +517,14 @@ function CommandModule({
   setSelectedRegion: (region: (typeof commandData.regions)[number]) => void;
   customVisits: Array<{ title: string; type: string; region: string; attendance: number; sentiment: number; x: number; y: number }>;
   meetingAttendees: MeetingAttendee[];
-  seedDataEnabled: boolean;
+  packagedDataEnabled: boolean;
   addVisitToSelectedRegion: () => void;
 }) {
-  const visits = [...customVisits, ...(seedDataEnabled ? commandData.candidateVisits : [])];
-  const commandAlerts = seedDataEnabled ? commandData.alerts : [];
-  const commandInsights = seedDataEnabled ? commandData.insights : [];
-  const commandPosts = seedDataEnabled ? commandData.posts : [];
-  const commandReports = seedDataEnabled ? commandData.reports : [];
+  const visits = [...customVisits, ...(packagedDataEnabled ? commandData.candidateVisits : [])];
+  const commandAlerts = packagedDataEnabled ? commandData.alerts : [];
+  const commandInsights = packagedDataEnabled ? commandData.insights : [];
+  const commandPosts = packagedDataEnabled ? commandData.posts : [];
+  const commandReports = packagedDataEnabled ? commandData.reports : [];
   return (
     <>
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.45fr_.9fr]">
@@ -728,7 +727,7 @@ function FieldModule({
   addFieldAgent,
   updateFieldAgent,
   deleteFieldAgent,
-  seedDataEnabled
+  packagedDataEnabled
 }: {
   fieldDrafts: Array<{ title: string; region: string; type: string }>;
   addFieldDraft: (draft: { title: string; region: string; type: string }) => void;
@@ -736,7 +735,7 @@ function FieldModule({
   addFieldAgent: (agent: { name: string; phone: string; pollingStation: string; ward: string; status: string }) => void;
   updateFieldAgent: (phone: string, patch: Partial<{ name: string; phone: string; pollingStation: string; ward: string; status: string }>) => void;
   deleteFieldAgent: (phone: string) => void;
-  seedDataEnabled: boolean;
+  packagedDataEnabled: boolean;
 }) {
   const [title, setTitle] = useState("Polling station queue irregularity");
   const [region, setRegion] = useState("Nairobi West");
@@ -769,7 +768,7 @@ function FieldModule({
       </Panel>
       <Panel title="Sync Queue" icon={<Database size={20} />}>
         <div className="space-y-3">
-          {[...fieldDrafts, ...(seedDataEnabled ? commandData.reports.map((report) => ({ title: report.title, region: report.region.name, type: report.type })) : [])].map((report, index) => (
+          {[...fieldDrafts, ...(packagedDataEnabled ? commandData.reports.map((report) => ({ title: report.title, region: report.region.name, type: report.type })) : [])].map((report, index) => (
             <article key={`${report.title}-${index}`} className="rounded-md border border-white/10 bg-white/[.035] p-4">
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span>{report.type.replaceAll("_", " ")}</span>
@@ -819,18 +818,18 @@ function FieldModule({
 function SocialModule({
   publishedMessages,
   publishMessage,
-  seedDataEnabled
+  packagedDataEnabled
 }: {
   publishedMessages: Array<{ message: string; period: string; channels: string[]; asset: string }>;
   publishMessage: (message: { message: string; period: string; channels: string[]; asset: string }) => void;
-  seedDataEnabled: boolean;
+  packagedDataEnabled: boolean;
 }) {
   const [sentiment, setSentiment] = useState("ALL");
-  const [message, setMessage] = useState(seedDataEnabled ? commandData.mediaStrategies[0].message : "");
-  const [period, setPeriod] = useState(seedDataEnabled ? commandData.mediaStrategies[0].period : "");
-  const [asset, setAsset] = useState(seedDataEnabled ? commandData.mediaStrategies[0].assets[0] : "");
+  const [message, setMessage] = useState(packagedDataEnabled ? commandData.mediaStrategies[0].message : "");
+  const [period, setPeriod] = useState(packagedDataEnabled ? commandData.mediaStrategies[0].period : "");
+  const [asset, setAsset] = useState(packagedDataEnabled ? commandData.mediaStrategies[0].assets[0] : "");
   const [uploadedAssetPreview, setUploadedAssetPreview] = useState("");
-  const posts = seedDataEnabled ? commandData.posts.filter((post) => sentiment === "ALL" || post.sentiment === sentiment) : [];
+  const posts = packagedDataEnabled ? commandData.posts.filter((post) => sentiment === "ALL" || post.sentiment === sentiment) : [];
   function uploadMediaAsset(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -902,12 +901,12 @@ function AiModule({
   generatedBriefing,
   generateBriefing,
   surveyResponses,
-  seedDataEnabled
+  packagedDataEnabled
 }: {
   generatedBriefing: string;
   generateBriefing: () => void;
   surveyResponses: SurveyResponse[];
-  seedDataEnabled: boolean;
+  packagedDataEnabled: boolean;
 }) {
   const latestSurvey = surveyResponses[0];
   return (
@@ -925,7 +924,7 @@ function AiModule({
       </Panel>
       <Panel title="Recommendation Queue" icon={<CircleDot size={20} />}>
         <div className="space-y-3">
-          {(seedDataEnabled ? commandData.insights : []).map((insight) => (
+          {(packagedDataEnabled ? commandData.insights : []).map((insight) => (
             <article key={insight.title} className="rounded-md border border-white/10 bg-white/[.035] p-4">
               <h3 className="font-semibold text-white">{insight.title}</h3>
               <p className="mt-2 text-sm leading-6 text-slate-300">{insight.recommendation}</p>
@@ -945,18 +944,36 @@ function AiModule({
   );
 }
 
-function CrmModule() {
+function CrmModule({
+  selectedParty,
+  platformParties,
+  meetingAttendees
+}: {
+  selectedParty: string;
+  platformParties: Array<{ name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }>;
+  meetingAttendees: MeetingAttendee[];
+}) {
+  const party = platformParties.find((item) => item.abbreviation === selectedParty);
+  const rankedContacts = [...meetingAttendees].sort((a, b) => b.supportScore - a.supportScore);
   return (
-    <Panel title="Political CRM" icon={<Handshake size={20} />}>
+    <Panel title={party ? `${party.name} Contact Registry` : "Candidate Contact Registry"} icon={<Handshake size={20} />}>
+      <div className="mb-4 rounded-md border border-sky-300/20 bg-sky-300/10 p-3 text-sm leading-6 text-sky-50">
+        Contacts are populated from candidate meetings, public survey submissions, voter imports, and field-agent collection. No packaged contact records are included in the build.
+      </div>
       <div className="grid gap-3 md:grid-cols-3">
-        {commandData.crm.map((contact) => (
-          <article key={contact.name} className="rounded-md border border-white/10 bg-white/[.035] p-4">
-            <p className="text-xs text-slate-400">{contact.type.replaceAll("_", " ")} / {contact.region}</p>
+        {rankedContacts.map((contact) => (
+          <article key={`${contact.phone}-${contact.attendedAt}`} className="rounded-md border border-white/10 bg-white/[.035] p-4">
+            <p className="text-xs text-slate-400">{contact.meetingType} / {contact.location}</p>
             <h3 className="mt-2 text-lg font-semibold text-white">{contact.name}</h3>
-            <p className="mt-3 text-sm text-slate-300">Support score {contact.score}%</p>
-            <p className="mt-3 border-l border-sky-300/40 pl-3 text-sm leading-6 text-sky-100">{contact.next}</p>
+            <p className="mt-3 text-sm text-slate-300">{contact.phone}</p>
+            <p className="mt-3 border-l border-sky-300/40 pl-3 text-sm leading-6 text-sky-100">Support score {contact.supportScore}%</p>
           </article>
         ))}
+        {!rankedContacts.length ? (
+          <div className="rounded-md border border-white/10 bg-white/[.035] p-4 text-sm leading-6 text-slate-300 md:col-span-3">
+            No contacts have been recorded yet. Add meeting attendance, collect survey responses, or import voter/contact files to build this registry.
+          </div>
+        ) : null}
       </div>
     </Panel>
   );
@@ -964,8 +981,16 @@ function CrmModule() {
 
 function SurveyModule({ surveyResponses }: { surveyResponses: SurveyResponse[] }) {
   const [baseUrl, setBaseUrl] = useState("http://localhost:3000/survey");
-  const [selectedSlug, setSelectedSlug] = useState(commandData.surveys[0].slug);
-  const [questions, setQuestions] = useState<SurveyQuestion[]>(defaultSurveyQuestions[selectedSlug]);
+  const surveyTemplates = Object.keys(defaultSurveyQuestions).map((slug) => ({
+    name: slug.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+    slug,
+    responses: surveyResponses.filter((response) => response.slug === slug).length,
+    sentiment: 0,
+    complete: 0,
+    target: "Configured field questionnaire"
+  }));
+  const [selectedSlug, setSelectedSlug] = useState(surveyTemplates[0]?.slug ?? "cost-of-living-pulse");
+  const [questions, setQuestions] = useState<SurveyQuestion[]>(defaultSurveyQuestions[selectedSlug] ?? []);
   const [qrVersions, setQrVersions] = useState<Record<string, number>>({});
 
   useEffect(() => {
@@ -974,7 +999,7 @@ function SurveyModule({ surveyResponses }: { surveyResponses: SurveyResponse[] }
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKeyForSurvey(selectedSlug));
-    setQuestions(saved ? JSON.parse(saved) : defaultSurveyQuestions[selectedSlug]);
+    setQuestions(saved ? JSON.parse(saved) : defaultSurveyQuestions[selectedSlug] ?? []);
   }, [selectedSlug]);
 
   function addQuestion() {
@@ -1001,7 +1026,7 @@ function SurveyModule({ surveyResponses }: { surveyResponses: SurveyResponse[] }
   }
 
   function resetQuestions() {
-    const defaults = defaultSurveyQuestions[selectedSlug];
+    const defaults = defaultSurveyQuestions[selectedSlug] ?? [];
     window.localStorage.removeItem(storageKeyForSurvey(selectedSlug));
     setQuestions(defaults);
   }
@@ -1023,7 +1048,7 @@ function SurveyModule({ surveyResponses }: { surveyResponses: SurveyResponse[] }
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.95fr_1.05fr]">
       <Panel title="Polling & Survey Engine" icon={<FileText size={20} />}>
         <div className="grid gap-3">
-          {commandData.surveys.map((survey) => (
+          {surveyTemplates.map((survey) => (
             <article key={survey.name} className={`rounded-md border p-4 ${selectedSlug === survey.slug ? "border-sky-300 bg-sky-300/10" : "border-white/10 bg-white/[.035]"}`}>
               <button className="w-full text-left" onClick={() => setSelectedSlug(survey.slug)}>
                 <h3 className="font-semibold text-white">{survey.name}</h3>
@@ -1109,14 +1134,14 @@ function QrPreview({ value, cacheKey }: { value: string; cacheKey: string }) {
   );
 }
 
-function AlertsModule({ surveyResponses, seedDataEnabled }: { surveyResponses: SurveyResponse[]; seedDataEnabled: boolean }) {
+function AlertsModule({ surveyResponses, packagedDataEnabled }: { surveyResponses: SurveyResponse[]; packagedDataEnabled: boolean }) {
   const surveyAlerts = surveyResponses.slice(0, 3).map((response) => ({
     severity: "HIGH",
     title: "Fresh survey signal submitted",
     message: `New public survey response from ${String(response.answers.location ?? "unknown location")} is ready for AI triage and dashboard scoring.`,
     region: { name: String(response.answers.location ?? "Survey") }
   }));
-  const alerts = [...surveyAlerts, ...(seedDataEnabled ? commandData.alerts : [])];
+  const alerts = [...surveyAlerts, ...(packagedDataEnabled ? commandData.alerts : [])];
   return (
     <Panel title="Alert Operations" icon={<Siren size={20} />}>
       <div className="mb-4 rounded-md border border-white/10 bg-white/[.035] p-3 text-sm leading-6 text-slate-300">
@@ -1288,13 +1313,13 @@ function CommunicationsModule({
 }
 
 function CreatorClimateModule({
-  seedDataEnabled,
+  packagedDataEnabled,
   onboardedCandidates
 }: {
-  seedDataEnabled: boolean;
+  packagedDataEnabled: boolean;
   onboardedCandidates: Array<{ name: string; office: string; party: string; region: string }>;
 }) {
-  const climateCandidates = [...onboardedCandidates, ...(seedDataEnabled ? commandData.candidates : [])];
+  const climateCandidates = [...onboardedCandidates, ...(packagedDataEnabled ? commandData.candidates : [])];
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
       <Panel title="Overall Political Climate" icon={<Activity size={20} />}>
@@ -1344,8 +1369,7 @@ function CreatorModule({
   platformParties,
   creatorAccount,
   updateCreatorAccount,
-  seedDataEnabled,
-  clearSeedData
+  packagedDataEnabled
 }: {
   addCandidate: (candidate: { name: string; office: string; party: string; region: string; userKey: string; username: string; password: string }) => void;
   onboardedCandidates: Array<{ name: string; office: string; party: string; region: string }>;
@@ -1361,8 +1385,7 @@ function CreatorModule({
   platformParties: Array<{ name: string; abbreviation: string; color: string; ideology: string; influenceScore: number; sentimentScore: number; strongholds: string[]; risks: string[] }>;
   creatorAccount: CreatorAccount;
   updateCreatorAccount: (account: CreatorAccount) => void;
-  seedDataEnabled: boolean;
-  clearSeedData: () => void;
+  packagedDataEnabled: boolean;
 }) {
   const [name, setName] = useState("New Candidate");
   const [office, setOffice] = useState("Governor");
@@ -1374,8 +1397,8 @@ function CreatorModule({
   const [creatorDraft, setCreatorDraft] = useState(creatorAccount);
   const [partyName, setPartyName] = useState("New Political Party");
   const [partyAbbr, setPartyAbbr] = useState("NPP");
-  const seedCandidates = seedDataEnabled ? commandData.candidates.filter((candidate) => !deletedCandidateNames.includes(candidate.name)) : [];
-  const candidates = [...onboardedCandidates, ...seedCandidates];
+  const packagedCandidates = packagedDataEnabled ? commandData.candidates.filter((candidate) => !deletedCandidateNames.includes(candidate.name)) : [];
+  const candidates = [...onboardedCandidates, ...packagedCandidates];
   const activeCandidateCount = candidates.filter((candidate) => candidateStatuses[candidate.name] !== "Suspended").length;
   const accessCount = candidateLoginAccounts.length + activeCandidateCount;
   async function onboardCandidate() {
@@ -1459,23 +1482,6 @@ function CreatorModule({
           ))}
         </div>
       </Panel>
-      <div className="xl:col-span-2">
-        <Panel title="Seed Data Control" icon={<Database size={20} />}>
-          <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-            <div className="rounded-md border border-white/10 bg-white/[.035] p-3 text-sm leading-6 text-slate-300">
-              Seed data is only a demo layer. Clear it before onboarding real candidates so demo agents, resources, candidate accounts, visits, and communications do not mix with live client work.
-              <span className="mt-2 block font-semibold text-white">Status: {seedDataEnabled ? "Seed data enabled" : "Seed data cleared"}</span>
-            </div>
-            <button
-              onClick={clearSeedData}
-              disabled={!seedDataEnabled}
-              className="h-11 rounded-md border border-rose-300/40 px-4 font-semibold text-rose-100 hover:bg-rose-300/10 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Clear Seed Data
-            </button>
-          </div>
-        </Panel>
-      </div>
       <div className="xl:col-span-2">
         <Panel title="Creator Credential Control" icon={<ShieldCheck size={20} />}>
           <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">
@@ -1817,11 +1823,11 @@ function CustomizeModule({
 function VoterImportModule({
   uploadedVoterFile,
   setUploadedVoterFile,
-  seedDataEnabled
+  packagedDataEnabled
 }: {
   uploadedVoterFile: string;
   setUploadedVoterFile: (file: string) => void;
-  seedDataEnabled: boolean;
+  packagedDataEnabled: boolean;
 }) {
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.85fr_1.15fr]">
@@ -1847,7 +1853,7 @@ function VoterImportModule({
       </Panel>
       <Panel title="Voter Count Coverage" icon={<Layers size={20} />}>
         <div className="space-y-3">
-          {(seedDataEnabled ? commandData.voterImports : []).map((item) => (
+          {(packagedDataEnabled ? commandData.voterImports : []).map((item) => (
             <article key={item.fileName} className="rounded-md border border-white/10 bg-white/[.035] p-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -1862,7 +1868,7 @@ function VoterImportModule({
               </div>
             </article>
           ))}
-          {(seedDataEnabled ? commandData.regions : []).map((region) => (
+          {(packagedDataEnabled ? commandData.regions : []).map((region) => (
             <div key={region.code} className="flex items-center justify-between rounded-md border border-white/10 bg-white/[.025] px-4 py-3">
               <span className="text-sm text-slate-300">{region.name}</span>
               <span className="font-semibold text-white">{region.registeredVoters.toLocaleString()} voters</span>
