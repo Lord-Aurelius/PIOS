@@ -318,7 +318,7 @@ export function CommandCenter() {
           />
         ) : null}
         {activeModule === "social" ? (
-          <SocialModule publishedMessages={publishedMessages} publishMessage={publishMessage} packagedDataEnabled={packagedDataEnabled} />
+          <SocialModule publishedMessages={publishedMessages} publishMessage={publishMessage} socialHandles={socialHandles} packagedDataEnabled={packagedDataEnabled} />
         ) : null}
         {activeModule === "ai" ? (
           <AiModule generatedBriefing={generatedBriefing} generateBriefing={generateBriefing} surveyResponses={approvedSurveyResponses} packagedDataEnabled={packagedDataEnabled} />
@@ -862,10 +862,12 @@ function FieldModule({
 function SocialModule({
   publishedMessages,
   publishMessage,
+  socialHandles,
   packagedDataEnabled
 }: {
   publishedMessages: Array<{ message: string; period: string; channels: string[]; asset: string }>;
   publishMessage: (message: { message: string; period: string; channels: string[]; asset: string }) => void;
+  socialHandles: Array<{ network: string; handle: string; status: string; risk: string }>;
   packagedDataEnabled: boolean;
 }) {
   const [sentiment, setSentiment] = useState("ALL");
@@ -874,6 +876,7 @@ function SocialModule({
   const [period, setPeriod] = useState(firstStrategy?.period ?? "");
   const [asset, setAsset] = useState(firstStrategy?.assets[0] ?? "");
   const [uploadedAssetPreview, setUploadedAssetPreview] = useState("");
+  const [publishStatus, setPublishStatus] = useState("");
   const posts = packagedDataEnabled ? commandData.posts.filter((post) => sentiment === "ALL" || post.sentiment === sentiment) : [];
   function uploadMediaAsset(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -882,6 +885,32 @@ function SocialModule({
     const reader = new FileReader();
     reader.onload = () => setUploadedAssetPreview(String(reader.result));
     reader.readAsDataURL(file);
+  }
+  async function publishEverywhere() {
+    const handles = socialHandles.map((handle) => ({ network: handle.network, handle: handle.handle })).filter((handle) => handle.handle.trim());
+    if (!handles.length) {
+      setPublishStatus("Connect candidate social handles in Access before publishing.");
+      return;
+    }
+    const channelLabels = handles.map((handle) => `${handle.network}: ${handle.handle}`);
+    const apiBase = process.env.NEXT_PUBLIC_API_URL;
+    if (apiBase) {
+      try {
+        const response = await fetch(`${apiBase}/api/v1/public/social/publish`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ message, period, asset, handles })
+        });
+        if (!response.ok) throw new Error("Social publishing queue rejected the message.");
+        const result = await response.json();
+        setPublishStatus(result.note ?? "Queued to connected handles.");
+      } catch (error) {
+        setPublishStatus(error instanceof Error ? error.message : "Unable to queue social publishing.");
+      }
+    } else {
+      setPublishStatus("No API URL is configured, so the post is saved locally only.");
+    }
+    publishMessage({ message, period, asset, channels: channelLabels });
   }
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.9fr_1.1fr]">
@@ -906,11 +935,15 @@ function SocialModule({
             )}
           </label>
           <button
-            onClick={() => publishMessage({ message, period, asset, channels: ["X", "Facebook", "TikTok", "WhatsApp"] })}
+            onClick={publishEverywhere}
             className="h-11 w-full rounded-md bg-sky-300 font-semibold text-slate-950 hover:bg-sky-200"
           >
-            Publish Everywhere
+            Publish to Connected Handles
           </button>
+          {publishStatus ? <p className="rounded-md border border-sky-300/20 bg-sky-300/10 p-3 text-sm text-sky-50">{publishStatus}</p> : null}
+          <div className="rounded-md border border-white/10 bg-white/[.035] p-3 text-sm leading-6 text-slate-300">
+            {socialHandles.length ? `${socialHandles.length} connected handles available: ${socialHandles.map((handle) => `${handle.network} ${handle.handle}`).join(", ")}` : "No connected handles yet. Add the candidate's handles in Access."}
+          </div>
         </div>
         <div className="mt-4 grid gap-2">
           {publishedMessages.map((item, index) => (
@@ -1874,7 +1907,7 @@ function AccessModule({
               <p className="mt-3 text-sm leading-6 text-slate-300">{social.risk}</p>
             </article>
           ))}
-          <button className="flex h-11 w-full items-center justify-center gap-2 rounded-md border border-sky-300/40 text-sm font-semibold text-sky-100 hover:bg-sky-300/10">
+          <button onClick={() => addSocialHandle({ network, handle, status: "Connected", risk: "Awaiting media activity" })} className="flex h-11 w-full items-center justify-center gap-2 rounded-md border border-sky-300/40 text-sm font-semibold text-sky-100 hover:bg-sky-300/10">
             <Plus size={16} />
             Connect Social Handle
           </button>
@@ -2031,7 +2064,7 @@ function VoterImportModule({
   uploadedVoterFile: string;
   setUploadedVoterFile: (file: string) => void;
   voterImportJobs: VoterImportJob[];
-  queueVoterImport: (fileName: string) => void;
+  queueVoterImport: (fileName: string) => string;
   updateVoterImportJob: (id: string, patch: Partial<VoterImportJob>) => void;
   packagedDataEnabled: boolean;
 }) {
@@ -2063,10 +2096,44 @@ function VoterImportModule({
     return () => window.clearInterval(timer);
   }, [updateVoterImportJob, voterImportJobs]);
 
-  function handleUpload(fileName: string) {
-    if (!fileName) return;
-    setUploadedVoterFile(fileName);
-    queueVoterImport(fileName);
+  function handleUpload(file?: File) {
+    if (!file) return;
+    setUploadedVoterFile(file.name);
+    const jobId = queueVoterImport(file.name);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL;
+      if (!apiBase) {
+        updateVoterImportJob(jobId, {
+          progress: 35,
+          stage: "Parsing PDF",
+          message: "No API URL is configured, so this file cannot reach the backend parser yet."
+        });
+        return;
+      }
+      updateVoterImportJob(jobId, { progress: 20, stage: "Uploading", message: "Uploading PDF to the backend parser worker." });
+      try {
+        const response = await fetch(`${apiBase}/api/v1/public/voter-imports`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ fileName: file.name, fileBase64: String(reader.result), sourceName: "IEBC voter register upload" })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message ?? "Parser request failed.");
+        updateVoterImportJob(jobId, {
+          progress: 100,
+          stage: "Ready for review",
+          message: `Backend parser complete: ${result.rowsParsed ?? 0} rows and ${(result.votersTotal ?? 0).toLocaleString()} registered voters extracted.`
+        });
+      } catch (error) {
+        updateVoterImportJob(jobId, {
+          progress: 100,
+          stage: "Ready for review",
+          message: `Parser could not complete automatically: ${error instanceof Error ? error.message : "unknown parser error"}. Review the file or try a text-based PDF.`
+        });
+      }
+    };
+    reader.readAsDataURL(file);
   }
 
   return (
@@ -2077,7 +2144,7 @@ function VoterImportModule({
             className="hidden"
             type="file"
             accept="application/pdf"
-            onChange={(event) => handleUpload(event.target.files?.[0]?.name ?? "")}
+            onChange={(event) => handleUpload(event.target.files?.[0])}
           />
           <Database className="mb-3 text-sky-200" />
           <span className="font-semibold text-white">Upload IEBC PDF register</span>

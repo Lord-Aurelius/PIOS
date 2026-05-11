@@ -9,6 +9,7 @@ import { IntelligenceModule } from "./modules/intelligence/intelligence.module";
 import { PrismaModule } from "./modules/prisma/prisma.module";
 import { SocialModule } from "./modules/social/social.module";
 import { SurveysModule } from "./modules/surveys/surveys.module";
+import { VoterImportsModule } from "./modules/voter-imports/voter-imports.module";
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { SurveysModule } from "./modules/surveys/surveys.module";
     SocialModule,
     GisModule,
     SurveysModule,
+    VoterImportsModule,
     AlertsModule
   ]
 })

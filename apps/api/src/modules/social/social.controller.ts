@@ -15,6 +15,13 @@ class IngestSocialPostDto {
   @IsOptional() @IsArray() hashtags?: string[];
 }
 
+class PublishSocialMessageDto {
+  @IsString() message!: string;
+  @IsOptional() @IsString() period?: string;
+  @IsOptional() @IsString() asset?: string;
+  @IsArray() handles!: Array<{ network: string; handle: string }>;
+}
+
 @Controller("social")
 @UseGuards(TenantGuard)
 export class SocialController {
@@ -53,5 +60,43 @@ export class SocialController {
         hashtags: body.hashtags ?? []
       }
     });
+  }
+}
+
+@Controller("public/social")
+export class PublicSocialController {
+  private readonly platformSlug = "house-aurelius-platform";
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  @Post("publish")
+  async publish(@Body() body: PublishSocialMessageDto) {
+    const tenant = await this.prisma.tenant.upsert({
+      where: { slug: this.platformSlug },
+      update: {},
+      create: {
+        name: "House Aurelius Platform",
+        slug: this.platformSlug,
+        country: "Kenya",
+        brand: {}
+      }
+    });
+    const config = (tenant.aiConfig ?? {}) as Record<string, unknown>;
+    const publication = {
+      id: `publication-${Date.now()}`,
+      message: body.message,
+      period: body.period ?? "",
+      asset: body.asset ?? "",
+      handles: body.handles,
+      status: "QUEUED_FOR_PLATFORM_DELIVERY",
+      note: "Queued against connected handles. Platform OAuth tokens are required before live posting can be completed.",
+      createdAt: new Date().toISOString()
+    };
+    const publicationLog = Array.isArray(config.publicationLog) ? config.publicationLog : [];
+    await this.prisma.tenant.update({
+      where: { id: tenant.id },
+      data: { aiConfig: { ...config, publicationLog: [publication, ...publicationLog].slice(0, 100) } }
+    });
+    return publication;
   }
 }

@@ -134,7 +134,7 @@ type OpsState = {
   addFieldDraft: (draft: { title: string; region: string; type: string }) => void;
   setSelectedParty: (selectedParty: string) => void;
   setUploadedVoterFile: (uploadedVoterFile: string) => void;
-  queueVoterImport: (fileName: string) => void;
+  queueVoterImport: (fileName: string) => string;
   updateVoterImportJob: (id: string, patch: Partial<VoterImportJob>) => void;
   addCandidate: (candidate: { name: string; office: string; party: string; region: string; userKey: string; username: string; password: string }) => void;
   addVisitToSelectedRegion: () => void;
@@ -258,12 +258,13 @@ export const useOpsStore = create<OpsState>()(
   addFieldDraft: (draft) => set((state) => ({ fieldDrafts: [draft, ...state.fieldDrafts] })),
   setSelectedParty: (selectedParty) => set({ selectedParty }),
   setUploadedVoterFile: (uploadedVoterFile) => set({ uploadedVoterFile }),
-  queueVoterImport: (fileName) =>
+  queueVoterImport: (fileName) => {
+    const id = `voter-import-${Date.now()}`;
     set((state) => ({
       uploadedVoterFile: fileName,
       voterImportJobs: [
         {
-          id: `voter-import-${Date.now()}`,
+          id,
           fileName,
           progress: 5,
           stage: "Queued",
@@ -272,7 +273,9 @@ export const useOpsStore = create<OpsState>()(
         },
         ...state.voterImportJobs
       ]
-    })),
+    }));
+    return id;
+  },
   updateVoterImportJob: (id, patch) =>
     set((state) => ({
       voterImportJobs: state.voterImportJobs.map((job) => (job.id === id ? { ...job, ...patch } : job))
