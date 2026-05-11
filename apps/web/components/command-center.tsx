@@ -33,7 +33,7 @@ import {
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { commandData, emptyRegion } from "@/lib/production-defaults";
-import { CandidateLoginAccount, CreatorAccount, InventoryItem, MeetingAttendee, ModuleKey, ResourceAllocation, StaffMember, useOpsStore, WorkspaceRole } from "@/lib/ops-store";
+import { CandidateLoginAccount, CreatorAccount, InventoryItem, MeetingAttendee, ModuleKey, ResourceAllocation, StaffMember, useOpsStore, VoterImportJob, WorkspaceRole } from "@/lib/ops-store";
 import {
   defaultSurveyQuestions,
   questionTypes,
@@ -81,6 +81,7 @@ export function CommandCenter() {
     fieldDrafts,
     selectedParty,
     uploadedVoterFile,
+    voterImportJobs,
     campaignName,
     candidateName,
     campaignSlogan,
@@ -111,6 +112,8 @@ export function CommandCenter() {
     addFieldDraft,
     setSelectedParty,
     setUploadedVoterFile,
+    queueVoterImport,
+    updateVoterImportJob,
     addCandidate,
     addVisitToSelectedRegion,
     updateCampaignProfile,
@@ -333,7 +336,14 @@ export function CommandCenter() {
         ) : null}
         {activeModule === "inventory" ? <InventoryModule inventoryItems={inventoryItems} addInventoryItem={addInventoryItem} /> : null}
         {activeModule === "voters" ? (
-          <VoterImportModule uploadedVoterFile={uploadedVoterFile} setUploadedVoterFile={setUploadedVoterFile} packagedDataEnabled={packagedDataEnabled} />
+          <VoterImportModule
+            uploadedVoterFile={uploadedVoterFile}
+            setUploadedVoterFile={setUploadedVoterFile}
+            voterImportJobs={voterImportJobs}
+            queueVoterImport={queueVoterImport}
+            updateVoterImportJob={updateVoterImportJob}
+            packagedDataEnabled={packagedDataEnabled}
+          />
         ) : null}
         {activeModule === "party" ? (
           <PartyModule selectedParty={selectedParty} setSelectedParty={setSelectedParty} platformParties={platformParties} />
@@ -2013,12 +2023,52 @@ function CustomizeModule({
 function VoterImportModule({
   uploadedVoterFile,
   setUploadedVoterFile,
+  voterImportJobs,
+  queueVoterImport,
+  updateVoterImportJob,
   packagedDataEnabled
 }: {
   uploadedVoterFile: string;
   setUploadedVoterFile: (file: string) => void;
+  voterImportJobs: VoterImportJob[];
+  queueVoterImport: (fileName: string) => void;
+  updateVoterImportJob: (id: string, patch: Partial<VoterImportJob>) => void;
   packagedDataEnabled: boolean;
 }) {
+  useEffect(() => {
+    const activeJobs = voterImportJobs.filter((job) => job.progress < 100);
+    if (!activeJobs.length) return;
+    const timer = window.setInterval(() => {
+      activeJobs.forEach((job) => {
+        const nextProgress = Math.min(100, job.progress + 15);
+        const nextStage =
+          nextProgress >= 100
+            ? "Ready for review"
+            : nextProgress >= 70
+              ? "Extracting voter counts"
+              : nextProgress >= 30
+                ? "Parsing PDF"
+                : "Uploading";
+        const nextMessage =
+          nextProgress >= 100
+            ? "Parsing pass complete. Review extracted regions before using this file for dashboard totals."
+            : nextProgress >= 70
+              ? "Extracting regional voter totals and checking table consistency."
+              : nextProgress >= 30
+                ? "Reading PDF pages and detecting polling-station tables."
+                : "Uploading file metadata and preparing the parser job.";
+        updateVoterImportJob(job.id, { progress: nextProgress, stage: nextStage, message: nextMessage });
+      });
+    }, 1200);
+    return () => window.clearInterval(timer);
+  }, [updateVoterImportJob, voterImportJobs]);
+
+  function handleUpload(fileName: string) {
+    if (!fileName) return;
+    setUploadedVoterFile(fileName);
+    queueVoterImport(fileName);
+  }
+
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.85fr_1.15fr]">
       <Panel title="IEBC Voter Register Import" icon={<Database size={20} />}>
@@ -2027,7 +2077,7 @@ function VoterImportModule({
             className="hidden"
             type="file"
             accept="application/pdf"
-            onChange={(event) => setUploadedVoterFile(event.target.files?.[0]?.name ?? "")}
+            onChange={(event) => handleUpload(event.target.files?.[0]?.name ?? "")}
           />
           <Database className="mb-3 text-sky-200" />
           <span className="font-semibold text-white">Upload IEBC PDF register</span>
@@ -2040,6 +2090,23 @@ function VoterImportModule({
             Queued for parsing: {uploadedVoterFile}
           </div>
         ) : null}
+        <div className="mt-4 space-y-3">
+          {voterImportJobs.map((job) => (
+            <article key={job.id} className="rounded-md border border-white/10 bg-white/[.035] p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="font-semibold text-white">{job.fileName}</h3>
+                  <p className="mt-1 text-sm text-slate-400">{job.stage}</p>
+                </div>
+                <span className="text-sm font-semibold text-sky-100">{job.progress}%</span>
+              </div>
+              <div className="mt-3 h-2 rounded-full bg-white/10">
+                <div className="h-2 rounded-full bg-sky-300 transition-all" style={{ width: `${job.progress}%` }} />
+              </div>
+              <p className="mt-3 text-sm leading-6 text-slate-300">{job.message}</p>
+            </article>
+          ))}
+        </div>
       </Panel>
       <Panel title="Voter Count Coverage" icon={<Layers size={20} />}>
         <div className="space-y-3">

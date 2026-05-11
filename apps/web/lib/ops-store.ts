@@ -52,6 +52,15 @@ export type InventoryItem = {
   status: string;
 };
 
+export type VoterImportJob = {
+  id: string;
+  fileName: string;
+  progress: number;
+  stage: "Queued" | "Uploading" | "Parsing PDF" | "Extracting voter counts" | "Ready for review";
+  message: string;
+  uploadedAt: string;
+};
+
 export type CandidateLoginAccount = {
   candidateName: string;
   userKey: string;
@@ -94,6 +103,7 @@ type OpsState = {
   fieldDrafts: Array<{ title: string; region: string; type: string }>;
   selectedParty: string;
   uploadedVoterFile: string;
+  voterImportJobs: VoterImportJob[];
   campaignName: string;
   candidateName: string;
   campaignSlogan: string;
@@ -124,6 +134,8 @@ type OpsState = {
   addFieldDraft: (draft: { title: string; region: string; type: string }) => void;
   setSelectedParty: (selectedParty: string) => void;
   setUploadedVoterFile: (uploadedVoterFile: string) => void;
+  queueVoterImport: (fileName: string) => void;
+  updateVoterImportJob: (id: string, patch: Partial<VoterImportJob>) => void;
   addCandidate: (candidate: { name: string; office: string; party: string; region: string; userKey: string; username: string; password: string }) => void;
   addVisitToSelectedRegion: () => void;
   updateCampaignProfile: (profile: { campaignName: string; candidateName: string; campaignSlogan: string; brandColor: string }) => void;
@@ -165,6 +177,7 @@ export const useOpsStore = create<OpsState>()(
   fieldDrafts: [],
   selectedParty: "",
   uploadedVoterFile: "",
+  voterImportJobs: [],
   campaignName: "New Campaign Workspace",
   candidateName: "Unassigned Candidate",
   campaignSlogan: "Configure this workspace from onboarding.",
@@ -245,6 +258,25 @@ export const useOpsStore = create<OpsState>()(
   addFieldDraft: (draft) => set((state) => ({ fieldDrafts: [draft, ...state.fieldDrafts] })),
   setSelectedParty: (selectedParty) => set({ selectedParty }),
   setUploadedVoterFile: (uploadedVoterFile) => set({ uploadedVoterFile }),
+  queueVoterImport: (fileName) =>
+    set((state) => ({
+      uploadedVoterFile: fileName,
+      voterImportJobs: [
+        {
+          id: `voter-import-${Date.now()}`,
+          fileName,
+          progress: 5,
+          stage: "Queued",
+          message: "File received in the browser and waiting for parser handoff.",
+          uploadedAt: new Date().toISOString()
+        },
+        ...state.voterImportJobs
+      ]
+    })),
+  updateVoterImportJob: (id, patch) =>
+    set((state) => ({
+      voterImportJobs: state.voterImportJobs.map((job) => (job.id === id ? { ...job, ...patch } : job))
+    })),
   addCandidate: (candidate) =>
     set((state) => ({
       onboardedCandidates: [{ name: candidate.name, office: candidate.office, party: candidate.party, region: candidate.region }, ...state.onboardedCandidates],
@@ -380,6 +412,7 @@ export const useOpsStore = create<OpsState>()(
       meetingAttendees: [],
       platformParties: state.platformParties.filter((party) => !commandData.parties.some((packagedParty) => packagedParty.abbreviation === party.abbreviation)),
       uploadedVoterFile: "",
+      voterImportJobs: [],
       generatedBriefing: "",
       campaignName: "New Campaign Workspace",
       candidateName: "Unassigned Candidate",
@@ -398,6 +431,7 @@ export const useOpsStore = create<OpsState>()(
         activeModule: state.activeModule,
         selectedParty: state.selectedParty,
         uploadedVoterFile: state.uploadedVoterFile,
+        voterImportJobs: state.voterImportJobs,
         campaignName: state.campaignName,
         candidateName: state.candidateName,
         campaignSlogan: state.campaignSlogan,
@@ -449,6 +483,7 @@ export const useOpsStore = create<OpsState>()(
               publishedMessages: [],
               sentMessages: [],
               uploadedVoterFile: "",
+              voterImportJobs: [],
               generatedBriefing: "",
               onboardedCandidates: persisted.onboardedCandidates?.filter((candidate) => !packagedCandidateNames.has(candidate.name)) ?? [],
               platformParties: persisted.platformParties?.filter((party) => !packagedPartyAbbreviations.has(party.abbreviation)) ?? [],
