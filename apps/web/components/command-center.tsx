@@ -33,7 +33,7 @@ import {
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { commandData, emptyRegion } from "@/lib/production-defaults";
-import { CandidateLoginAccount, CreatorAccount, InventoryItem, MeetingAttendee, ModuleKey, ResourceAllocation, StaffMember, useOpsStore, VoterImportJob, WorkspaceRole } from "@/lib/ops-store";
+import { CandidateLoginAccount, CreatorAccount, InventoryItem, MeetingAttendee, ModuleKey, Region, ResourceAllocation, StaffMember, useOpsStore, VoterImportJob, WorkspaceRole } from "@/lib/ops-store";
 import {
   defaultSurveyQuestions,
   questionTypes,
@@ -57,10 +57,13 @@ function severityClass(severity: string) {
   return "border-sky-400/50 bg-sky-500/10 text-sky-100";
 }
 
-function regionMapStyle(region: (typeof commandData.regions)[number], selected: boolean) {
-  const fill = region.risk >= 70 ? "#ef4444" : region.support >= 58 ? "#22c55e" : region.momentum < 0 ? "#f59e0b" : "#38bdf8";
+function regionMapStyle(region: Region, selected: boolean) {
+  const importedOnly = region.support === 0 && region.risk === 0 && region.momentum === 0 && region.registeredVoters > 0;
+  const importedFill = region.registeredVoters >= 8000 ? "#e879f9" : region.registeredVoters >= 5000 ? "#f97316" : region.registeredVoters >= 2500 ? "#06b6d4" : "#22c55e";
+  const fill = importedOnly ? importedFill : region.risk >= 70 ? "#ef4444" : region.support >= 58 ? "#22c55e" : region.momentum < 0 ? "#f59e0b" : "#38bdf8";
   const ring = selected ? "#ffffff" : region.risk >= 70 ? "#fecaca" : region.support >= 58 ? "#bbf7d0" : region.momentum < 0 ? "#fde68a" : "#bae6fd";
-  const glow = region.risk >= 70 ? "239,68,68" : region.support >= 58 ? "34,197,94" : region.momentum < 0 ? "245,158,11" : "56,189,248";
+  const importedGlow = region.registeredVoters >= 8000 ? "232,121,249" : region.registeredVoters >= 5000 ? "249,115,22" : region.registeredVoters >= 2500 ? "6,182,212" : "34,197,94";
+  const glow = importedOnly ? importedGlow : region.risk >= 70 ? "239,68,68" : region.support >= 58 ? "34,197,94" : region.momentum < 0 ? "245,158,11" : "56,189,248";
   return {
     background: fill,
     borderColor: ring,
@@ -82,6 +85,7 @@ export function CommandCenter() {
     selectedParty,
     uploadedVoterFile,
     voterImportJobs,
+    liveVoterRegions,
     campaignName,
     candidateName,
     campaignSlogan,
@@ -114,6 +118,8 @@ export function CommandCenter() {
     setUploadedVoterFile,
     queueVoterImport,
     updateVoterImportJob,
+    setLiveVoterRegions,
+    applyVoterImportToMap,
     addCandidate,
     addVisitToSelectedRegion,
     updateCampaignProfile,
@@ -141,6 +147,46 @@ export function CommandCenter() {
   } = useOpsStore();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [surveyResponses, setSurveyResponses] = useState<SurveyResponse[]>([]);
+  const mapRegions = useMemo(
+    () => (liveVoterRegions.length ? liveVoterRegions : packagedDataEnabled ? commandData.regions : []),
+    [liveVoterRegions, packagedDataEnabled]
+  );
+  useEffect(() => {
+    if (mapRegions.length && (selectedRegion.code === emptyRegion.code || !mapRegions.some((region) => region.code === selectedRegion.code))) {
+      setSelectedRegion(mapRegions[0]);
+    }
+  }, [mapRegions, selectedRegion.code, setSelectedRegion]);
+  useEffect(() => {
+    const apiBase = process.env.NEXT_PUBLIC_API_URL;
+    if (!apiBase || liveVoterRegions.length) return;
+    let cancelled = false;
+    async function loadAppliedVoterRegions() {
+      try {
+        const response = await fetch(`${apiBase}/api/v1/public/voter-imports/gis-regions`);
+        if (!response.ok) return;
+        const regions = (await response.json()) as Array<{ name: string; registeredVoters?: number }>;
+        if (cancelled || !regions.length) return;
+        setLiveVoterRegions(
+          regions.map((region, index) => ({
+            code: region.name.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 58) || `REGION-${index + 1}`,
+            name: region.name,
+            support: 0,
+            risk: 0,
+            momentum: 0,
+            registeredVoters: region.registeredVoters ?? 0,
+            x: Math.min(88, 12 + (index % 6) * 15),
+            y: Math.min(88, 14 + Math.floor(index / 6) * 10)
+          }))
+        );
+      } catch {
+        // The map can still be populated by applying a newly parsed import in the UI.
+      }
+    }
+    loadAppliedVoterRegions();
+    return () => {
+      cancelled = true;
+    };
+  }, [liveVoterRegions.length, setLiveVoterRegions]);
   useEffect(() => {
     async function loadSurveyResponses() {
       const localSurveySlugs = Object.keys(defaultSurveyQuestions);
@@ -188,7 +234,7 @@ export function CommandCenter() {
   const packagedCandidates = packagedDataEnabled ? commandData.candidates.filter((candidate) => !deletedCandidateNames.includes(candidate.name)) : [];
   const creatorClimateMetrics = [
     { label: "Tracked candidates", value: String([...onboardedCandidates, ...packagedCandidates].length), change: 12, tone: "positive" },
-    { label: "Regions monitored", value: String(commandData.regions.length), change: 4, tone: "neutral" },
+    { label: "Regions monitored", value: String(mapRegions.length), change: mapRegions.length ? 4 : 0, tone: "neutral" },
     { label: "Platform access users", value: String((packagedDataEnabled ? commandData.candidateAccounts.length : 0) + candidateLoginAccounts.length + staffMembers.length), change: 9, tone: "positive" },
     { label: "Climate risk index", value: "Medium", change: -3, tone: "neutral" }
   ];
@@ -198,7 +244,15 @@ export function CommandCenter() {
     { label: "Negative social spikes", value: "0", change: 0, tone: "neutral" },
     { label: "Priority swing areas", value: "0", change: 0, tone: "neutral" }
   ];
-  const candidateMetricSource = packagedDataEnabled ? commandData.metrics : blankCandidateMetrics;
+  const liveVoterTotal = liveVoterRegions.reduce((sum, region) => sum + region.registeredVoters, 0);
+  const largestVoterRegion = [...liveVoterRegions].sort((a, b) => b.registeredVoters - a.registeredVoters)[0];
+  const voterIntelligenceMetrics = [
+    { label: "Registered voters mapped", value: liveVoterTotal.toLocaleString(), change: 100, tone: "positive" },
+    { label: "Polling areas mapped", value: String(liveVoterRegions.length), change: 100, tone: "positive" },
+    { label: "Largest voter target", value: largestVoterRegion ? largestVoterRegion.registeredVoters.toLocaleString() : "0", change: 0, tone: "neutral" },
+    { label: "Priority swing areas", value: String(liveVoterRegions.length), change: 0, tone: "neutral" }
+  ];
+  const candidateMetricSource = liveVoterRegions.length ? voterIntelligenceMetrics : packagedDataEnabled ? commandData.metrics : blankCandidateMetrics;
   const visibleMetrics = workspaceRole === "creator" ? creatorClimateMetrics : workspaceRole === "clerk" ? candidateMetricSource.slice(1, 3) : candidateMetricSource;
   const approvedSurveyResponses = surveyResponses.filter((response) => approvedSurveySlugs.includes(response.slug));
   const candidateMetrics = workspaceRole === "creator" ? visibleMetrics : visibleMetrics.map((metric) => (metric.label === "Positive field signals" ? { ...metric, value: String(Number(metric.value) + approvedSurveyResponses.length) } : metric));
@@ -299,6 +353,7 @@ export function CommandCenter() {
             selectedRegion={selectedRegion}
             selectedSignals={selectedSignals}
             setSelectedRegion={setSelectedRegion}
+            mapRegions={mapRegions}
             customVisits={customVisits}
             meetingAttendees={meetingAttendees}
             packagedDataEnabled={packagedDataEnabled}
@@ -315,6 +370,7 @@ export function CommandCenter() {
             updateFieldAgent={updateFieldAgent}
             deleteFieldAgent={deleteFieldAgent}
             packagedDataEnabled={packagedDataEnabled}
+            mapRegions={mapRegions}
           />
         ) : null}
         {activeModule === "social" ? (
@@ -340,8 +396,10 @@ export function CommandCenter() {
             uploadedVoterFile={uploadedVoterFile}
             setUploadedVoterFile={setUploadedVoterFile}
             voterImportJobs={voterImportJobs}
+            liveVoterRegions={liveVoterRegions}
             queueVoterImport={queueVoterImport}
             updateVoterImportJob={updateVoterImportJob}
+            applyVoterImportToMap={applyVoterImportToMap}
             packagedDataEnabled={packagedDataEnabled}
           />
         ) : null}
@@ -386,6 +444,7 @@ export function CommandCenter() {
             meetingAttendees={meetingAttendees}
             addMeetingAttendee={addMeetingAttendee}
             sendAfricaTalkingMessage={sendAfricaTalkingMessage}
+            mapRegions={mapRegions}
           />
         ) : null}
         {activeModule === "comms" ? (
@@ -551,14 +610,16 @@ function CommandModule({
   selectedRegion,
   selectedSignals,
   setSelectedRegion,
+  mapRegions,
   customVisits,
   meetingAttendees,
   packagedDataEnabled,
   addVisitToSelectedRegion
 }: {
-  selectedRegion: (typeof commandData.regions)[number];
+  selectedRegion: Region;
   selectedSignals: number;
-  setSelectedRegion: (region: (typeof commandData.regions)[number]) => void;
+  setSelectedRegion: (region: Region) => void;
+  mapRegions: Region[];
   customVisits: Array<{ title: string; type: string; region: string; attendance: number; sentiment: number; x: number; y: number }>;
   meetingAttendees: MeetingAttendee[];
   packagedDataEnabled: boolean;
@@ -588,7 +649,7 @@ function CommandModule({
             <div className="grid gap-0 lg:grid-cols-[1fr_280px]">
               <div className="map-grid relative min-h-[420px] overflow-hidden bg-[#07101d]">
                 <div className="absolute inset-6 rounded-md border border-sky-300/10" />
-                {commandData.regions.map((region) => (
+                {mapRegions.map((region) => (
                   <button
                     key={region.code}
                     onClick={() => setSelectedRegion(region)}
@@ -601,6 +662,13 @@ function CommandModule({
                     </span>
                   </button>
                 ))}
+                {!mapRegions.length ? (
+                  <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
+                    <div className="max-w-md rounded-md border border-sky-300/20 bg-slate-950/80 p-4 text-sm leading-6 text-slate-300">
+                      Upload an IEBC voter-register PDF, review the extracted rows, then apply it to GIS to activate the political map.
+                    </div>
+                  </div>
+                ) : null}
                 {visits.map((visit) => (
                   <button
                     key={visit.title}
@@ -635,6 +703,12 @@ function CommandModule({
               <aside className="border-t border-white/10 p-4 lg:border-l lg:border-t-0">
                 <p className="text-sm text-slate-400">Selected region</p>
                 <h3 className="mt-1 text-xl font-semibold text-white">{selectedRegion.name}</h3>
+                {selectedRegion.registeredVoters ? (
+                  <div className="mt-3 rounded-md border border-cyan-300/20 bg-cyan-300/10 p-3">
+                    <p className="text-sm text-cyan-100">Registered voters</p>
+                    <strong className="mt-1 block text-2xl text-white">{selectedRegion.registeredVoters.toLocaleString()}</strong>
+                  </div>
+                ) : null}
                 <div className="mt-5 space-y-4">
                   {[
                     { label: "Support", value: selectedRegion.support, color: "bg-emerald-300" },
@@ -771,7 +845,8 @@ function FieldModule({
   addFieldAgent,
   updateFieldAgent,
   deleteFieldAgent,
-  packagedDataEnabled
+  packagedDataEnabled,
+  mapRegions
 }: {
   fieldDrafts: Array<{ title: string; region: string; type: string }>;
   addFieldDraft: (draft: { title: string; region: string; type: string }) => void;
@@ -780,6 +855,7 @@ function FieldModule({
   updateFieldAgent: (phone: string, patch: Partial<{ name: string; phone: string; pollingStation: string; ward: string; status: string }>) => void;
   deleteFieldAgent: (phone: string) => void;
   packagedDataEnabled: boolean;
+  mapRegions: Region[];
 }) {
   const [title, setTitle] = useState("Polling station queue irregularity");
   const [region, setRegion] = useState("Nairobi West");
@@ -794,7 +870,8 @@ function FieldModule({
         <div className="space-y-3">
           <input value={title} onChange={(event) => setTitle(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
           <select value={region} onChange={(event) => setRegion(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
-            {commandData.regions.map((item) => <option key={item.code}>{item.name}</option>)}
+            <option value="">Select mapped polling station or ward</option>
+            {mapRegions.map((item) => <option key={item.code}>{item.name}</option>)}
           </select>
           <select value={type} onChange={(event) => setType(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
             <option>HOUSEHOLD_VISIT</option>
@@ -1920,19 +1997,24 @@ function AccessModule({
 function MeetingsModule({
   meetingAttendees,
   addMeetingAttendee,
-  sendAfricaTalkingMessage
+  sendAfricaTalkingMessage,
+  mapRegions
 }: {
   meetingAttendees: MeetingAttendee[];
   addMeetingAttendee: (attendee: Omit<MeetingAttendee, "attendedAt">) => void;
   sendAfricaTalkingMessage: (message: { target: string; message: string; channel: string }) => void;
+  mapRegions: Region[];
 }) {
   const [name, setName] = useState("Home meeting attendee");
   const [phone, setPhone] = useState("+254700000000");
-  const [location, setLocation] = useState(commandData.regions[0]?.name ?? "");
+  const [location, setLocation] = useState(mapRegions[0]?.name ?? "");
   const [meetingType, setMeetingType] = useState("Home meeting");
   const [supportScore, setSupportScore] = useState(70);
-  const selectedRegion = commandData.regions.find((region) => region.name === location) ?? emptyRegion;
+  const selectedRegion = mapRegions.find((region) => region.name === location) ?? emptyRegion;
   const rankedAttendees = [...meetingAttendees].sort((a, b) => b.supportScore - a.supportScore);
+  useEffect(() => {
+    if (!location && mapRegions[0]) setLocation(mapRegions[0].name);
+  }, [location, mapRegions]);
 
   function addAttendee() {
     addMeetingAttendee({
@@ -1967,7 +2049,7 @@ function MeetingsModule({
           <input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Meeting location or ward" className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
           <select value={location} onChange={(event) => setLocation(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
             <option value="">Select mapped region when available</option>
-            {commandData.regions.map((region) => <option key={region.code}>{region.name}</option>)}
+            {mapRegions.map((region) => <option key={region.code}>{region.name}</option>)}
           </select>
           <select value={meetingType} onChange={(event) => setMeetingType(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
             <option>Home meeting</option>
@@ -1987,7 +2069,7 @@ function MeetingsModule({
       </Panel>
       <Panel title="Ranked Attendee List" icon={<MapPin size={20} />}>
         <div className="mb-4 grid gap-2 md:grid-cols-3">
-          {commandData.regions.map((region) => (
+          {mapRegions.map((region) => (
             <button key={region.code} onClick={() => bulkMessageLocation(region.name)} className="rounded-md border border-sky-300/40 px-3 py-2 text-sm font-semibold text-sky-100 hover:bg-sky-300/10">
               Message {region.name}
             </button>
@@ -2057,15 +2139,19 @@ function VoterImportModule({
   uploadedVoterFile,
   setUploadedVoterFile,
   voterImportJobs,
+  liveVoterRegions,
   queueVoterImport,
   updateVoterImportJob,
+  applyVoterImportToMap,
   packagedDataEnabled
 }: {
   uploadedVoterFile: string;
   setUploadedVoterFile: (file: string) => void;
   voterImportJobs: VoterImportJob[];
+  liveVoterRegions: Region[];
   queueVoterImport: (fileName: string) => string;
   updateVoterImportJob: (id: string, patch: Partial<VoterImportJob>) => void;
+  applyVoterImportToMap: (id: string) => Region[];
   packagedDataEnabled: boolean;
 }) {
   useEffect(() => {
@@ -2121,19 +2207,54 @@ function VoterImportModule({
         const result = await response.json();
         if (!response.ok) throw new Error(result.message ?? "Parser request failed.");
         updateVoterImportJob(jobId, {
+          backendId: result.id,
           progress: 100,
           stage: "Ready for review",
-          message: `Backend parser complete: ${result.rowsParsed ?? 0} rows and ${(result.votersTotal ?? 0).toLocaleString()} registered voters extracted.`
+          rowsParsed: result.rowsParsed ?? 0,
+          votersTotal: result.votersTotal ?? 0,
+          regions: result.regions ?? [],
+          intelligenceStatus: "Parsed",
+          message: `Backend parser complete: ${result.rowsParsed ?? 0} rows and ${(result.votersTotal ?? 0).toLocaleString()} registered voters. Review this import, then apply it to GIS so dashboards and the map can use it.`
         });
       } catch (error) {
         updateVoterImportJob(jobId, {
           progress: 100,
           stage: "Ready for review",
+          intelligenceStatus: "Needs review",
           message: `Parser could not complete automatically: ${error instanceof Error ? error.message : "unknown parser error"}. Review the file or try a text-based PDF.`
         });
       }
     };
     reader.readAsDataURL(file);
+  }
+
+  async function applyToGis(job: VoterImportJob) {
+    if (!job.regions?.length) {
+      updateVoterImportJob(job.id, {
+        intelligenceStatus: "Needs review",
+        message: "This import has no extracted regions available. Re-upload the PDF so the backend can attach the parsed rows to the review step."
+      });
+      return;
+    }
+    updateVoterImportJob(job.id, { stage: "Applying to GIS", message: "Writing voter counts into the GIS intelligence layer." });
+    const apiBase = process.env.NEXT_PUBLIC_API_URL;
+    if (apiBase && job.backendId) {
+      try {
+        const response = await fetch(`${apiBase}/api/v1/public/voter-imports/${job.backendId}/apply`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ regions: job.regions })
+        });
+        const result = await response.json();
+        if (!response.ok || result.ok === false) throw new Error(result.message ?? "GIS apply request failed.");
+      } catch (error) {
+        updateVoterImportJob(job.id, {
+          stage: "Ready for review",
+          message: `Backend GIS persistence failed: ${error instanceof Error ? error.message : "unknown error"}. The local map layer can still be applied for this session.`
+        });
+      }
+    }
+    applyVoterImportToMap(job.id);
   }
 
   return (
@@ -2171,6 +2292,29 @@ function VoterImportModule({
                 <div className="h-2 rounded-full bg-sky-300 transition-all" style={{ width: `${job.progress}%` }} />
               </div>
               <p className="mt-3 text-sm leading-6 text-slate-300">{job.message}</p>
+              {job.rowsParsed !== undefined || job.votersTotal !== undefined ? (
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <MetricMini label="Rows parsed" value={(job.rowsParsed ?? 0).toLocaleString()} />
+                  <MetricMini label="Registered voters" value={(job.votersTotal ?? 0).toLocaleString()} />
+                </div>
+              ) : null}
+              {job.regions?.length ? (
+                <div className="mt-4 max-h-36 overflow-auto rounded-md border border-white/10 bg-slate-950/50">
+                  {job.regions.slice(0, 12).map((region) => (
+                    <div key={`${job.id}-${region.name}`} className="flex items-center justify-between border-b border-white/5 px-3 py-2 text-sm last:border-b-0">
+                      <span className="text-slate-300">{region.name}</span>
+                      <span className="font-semibold text-white">{region.registeredVoters.toLocaleString()}</span>
+                    </div>
+                  ))}
+                  {job.regions.length > 12 ? <p className="px-3 py-2 text-xs text-slate-500">+{job.regions.length - 12} more rows</p> : null}
+                </div>
+              ) : null}
+              {job.intelligenceStatus !== "Applied" && job.regions?.length ? (
+                <button onClick={() => applyToGis(job)} className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-md bg-cyan-300 font-semibold text-slate-950 hover:bg-cyan-200">
+                  <MapPin size={16} />
+                  Apply to GIS Map and Intelligence
+                </button>
+              ) : null}
             </article>
           ))}
         </div>
@@ -2191,6 +2335,18 @@ function VoterImportModule({
                 <MetricMini label="Registered voters" value={item.votersTotal.toLocaleString()} />
               </div>
             </article>
+          ))}
+          {voterImportJobs.filter((job) => job.intelligenceStatus === "Applied").map((job) => (
+            <article key={`applied-${job.id}`} className="rounded-md border border-cyan-300/20 bg-cyan-300/10 p-4">
+              <h3 className="font-semibold text-white">{job.fileName}</h3>
+              <p className="mt-2 text-sm text-cyan-100">{(job.regions?.length ?? 0).toLocaleString()} mapped regions are active for GIS and dashboard intelligence.</p>
+            </article>
+          ))}
+          {liveVoterRegions.map((region) => (
+            <div key={`live-${region.code}`} className="flex items-center justify-between rounded-md border border-white/10 bg-white/[.025] px-4 py-3">
+              <span className="text-sm text-slate-300">{region.name}</span>
+              <span className="font-semibold text-white">{region.registeredVoters.toLocaleString()} voters</span>
+            </div>
           ))}
           {(packagedDataEnabled ? commandData.regions : []).map((region) => (
             <div key={region.code} className="flex items-center justify-between rounded-md border border-white/10 bg-white/[.025] px-4 py-3">

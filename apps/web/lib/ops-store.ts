@@ -1,8 +1,9 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { commandData, emptyRegion } from "./production-defaults";
+import { commandData, emptyRegion, RegionRecord } from "./production-defaults";
 
-export type Region = (typeof commandData.regions)[number];
+export type Region = RegionRecord;
+export type ImportedVoterRegion = { name: string; registeredVoters: number };
 export type ModuleKey =
   | "creator"
   | "command"
@@ -54,11 +55,17 @@ export type InventoryItem = {
 
 export type VoterImportJob = {
   id: string;
+  backendId?: string;
   fileName: string;
   progress: number;
-  stage: "Queued" | "Uploading" | "Parsing PDF" | "Extracting voter counts" | "Ready for review";
+  stage: "Queued" | "Uploading" | "Parsing PDF" | "Extracting voter counts" | "Ready for review" | "Applying to GIS" | "Applied to GIS";
   message: string;
   uploadedAt: string;
+  rowsParsed?: number;
+  votersTotal?: number;
+  regions?: ImportedVoterRegion[];
+  appliedAt?: string;
+  intelligenceStatus?: "Queued" | "Parsed" | "Applied" | "Needs review";
 };
 
 export type CandidateLoginAccount = {
@@ -104,6 +111,7 @@ type OpsState = {
   selectedParty: string;
   uploadedVoterFile: string;
   voterImportJobs: VoterImportJob[];
+  liveVoterRegions: Region[];
   campaignName: string;
   candidateName: string;
   campaignSlogan: string;
@@ -136,6 +144,8 @@ type OpsState = {
   setUploadedVoterFile: (uploadedVoterFile: string) => void;
   queueVoterImport: (fileName: string) => string;
   updateVoterImportJob: (id: string, patch: Partial<VoterImportJob>) => void;
+  setLiveVoterRegions: (regions: Region[]) => void;
+  applyVoterImportToMap: (id: string, regions?: ImportedVoterRegion[]) => Region[];
   addCandidate: (candidate: { name: string; office: string; party: string; region: string; userKey: string; username: string; password: string }) => void;
   addVisitToSelectedRegion: () => void;
   updateCampaignProfile: (profile: { campaignName: string; candidateName: string; campaignSlogan: string; brandColor: string }) => void;
@@ -163,6 +173,28 @@ type OpsState = {
   clearPackagedData: () => void;
 };
 
+export function buildVoterMapRegions(regions: ImportedVoterRegion[]): Region[] {
+  return regions
+    .filter((region) => region.name.trim() && Number.isFinite(region.registeredVoters))
+    .map((region, index) => {
+      const row = Math.floor(index / 6);
+      const column = index % 6;
+      const support = 0;
+      const risk = 0;
+      const momentum = 0;
+      return {
+        code: region.name.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 58) || `REGION-${index + 1}`,
+        name: region.name,
+        support,
+        risk,
+        momentum,
+        registeredVoters: region.registeredVoters,
+        x: Math.min(88, 12 + column * 15),
+        y: Math.min(88, 14 + row * 10)
+      };
+    });
+}
+
 export const useOpsStore = create<OpsState>()(
   persist(
     (set, get) => ({
@@ -178,6 +210,7 @@ export const useOpsStore = create<OpsState>()(
   selectedParty: "",
   uploadedVoterFile: "",
   voterImportJobs: [],
+  liveVoterRegions: [],
   campaignName: "New Campaign Workspace",
   candidateName: "Unassigned Candidate",
   campaignSlogan: "Configure this workspace from onboarding.",
@@ -250,10 +283,17 @@ export const useOpsStore = create<OpsState>()(
   setActiveModule: (activeModule) => set({ activeModule }),
   setSelectedRegion: (selectedRegion) => set({ selectedRegion }),
   generateBriefing: () =>
-    set({
-      generatedBriefing: get().packagedDataEnabled
-        ? "Executive brief: Nairobi West requires a cost-of-living response within 48 hours. Kibra remains the strongest mobilization opportunity. Embakasi East should receive targeted youth-jobs content and opposition-convoy monitoring."
-        : "Executive brief: No live political intelligence has been imported yet. Upload voter data, collect survey responses, connect social handles, or record field activity to generate real campaign insights."
+    set(() => {
+      const liveVoterRegions = get().liveVoterRegions;
+      const votersTotal = liveVoterRegions.reduce((sum, region) => sum + region.registeredVoters, 0);
+      const largestRegion = [...liveVoterRegions].sort((a, b) => b.registeredVoters - a.registeredVoters)[0];
+      return {
+        generatedBriefing: liveVoterRegions.length
+          ? `Executive brief: ${liveVoterRegions.length.toLocaleString()} mapped voter regions are active with ${votersTotal.toLocaleString()} registered voters. ${largestRegion.name} is the largest immediate mobilization target with ${largestRegion.registeredVoters.toLocaleString()} voters. Use field reports, survey findings, and candidate visits to convert this voter layer into support, risk, and turnout scores.`
+          : get().packagedDataEnabled
+            ? "Executive brief: Nairobi West requires a cost-of-living response within 48 hours. Kibra remains the strongest mobilization opportunity. Embakasi East should receive targeted youth-jobs content and opposition-convoy monitoring."
+            : "Executive brief: No live political intelligence has been imported yet. Upload voter data, collect survey responses, connect social handles, or record field activity to generate real campaign insights."
+      };
     }),
   addFieldDraft: (draft) => set((state) => ({ fieldDrafts: [draft, ...state.fieldDrafts] })),
   setSelectedParty: (selectedParty) => set({ selectedParty }),
@@ -269,7 +309,8 @@ export const useOpsStore = create<OpsState>()(
           progress: 5,
           stage: "Queued",
           message: "File received in the browser and waiting for parser handoff.",
-          uploadedAt: new Date().toISOString()
+          uploadedAt: new Date().toISOString(),
+          intelligenceStatus: "Queued"
         },
         ...state.voterImportJobs
       ]
@@ -280,6 +321,30 @@ export const useOpsStore = create<OpsState>()(
     set((state) => ({
       voterImportJobs: state.voterImportJobs.map((job) => (job.id === id ? { ...job, ...patch } : job))
     })),
+  setLiveVoterRegions: (liveVoterRegions) => set({ liveVoterRegions, selectedRegion: liveVoterRegions[0] ?? get().selectedRegion }),
+  applyVoterImportToMap: (id, suppliedRegions) => {
+    const job = get().voterImportJobs.find((item) => item.id === id || item.backendId === id);
+    const sourceRegions = suppliedRegions ?? job?.regions ?? [];
+    const liveVoterRegions = buildVoterMapRegions(sourceRegions);
+    if (!liveVoterRegions.length) return [];
+    set((state) => ({
+      liveVoterRegions,
+      selectedRegion: liveVoterRegions[0],
+      voterImportJobs: state.voterImportJobs.map((item) =>
+        item.id === id || item.backendId === id
+          ? {
+              ...item,
+              progress: 100,
+              stage: "Applied to GIS",
+              intelligenceStatus: "Applied",
+              appliedAt: new Date().toISOString(),
+              message: `${liveVoterRegions.length.toLocaleString()} voter regions are now active on the GIS political map and dashboard intelligence layer.`
+            }
+          : item
+      )
+    }));
+    return liveVoterRegions;
+  },
   addCandidate: (candidate) =>
     set((state) => ({
       onboardedCandidates: [{ name: candidate.name, office: candidate.office, party: candidate.party, region: candidate.region }, ...state.onboardedCandidates],
@@ -416,6 +481,7 @@ export const useOpsStore = create<OpsState>()(
       platformParties: state.platformParties.filter((party) => !commandData.parties.some((packagedParty) => packagedParty.abbreviation === party.abbreviation)),
       uploadedVoterFile: "",
       voterImportJobs: [],
+      liveVoterRegions: [],
       generatedBriefing: "",
       campaignName: "New Campaign Workspace",
       candidateName: "Unassigned Candidate",
@@ -435,6 +501,7 @@ export const useOpsStore = create<OpsState>()(
         selectedParty: state.selectedParty,
         uploadedVoterFile: state.uploadedVoterFile,
         voterImportJobs: state.voterImportJobs,
+        liveVoterRegions: state.liveVoterRegions,
         campaignName: state.campaignName,
         candidateName: state.candidateName,
         campaignSlogan: state.campaignSlogan,
@@ -487,6 +554,7 @@ export const useOpsStore = create<OpsState>()(
               sentMessages: [],
               uploadedVoterFile: "",
               voterImportJobs: [],
+              liveVoterRegions: [],
               generatedBriefing: "",
               onboardedCandidates: persisted.onboardedCandidates?.filter((candidate) => !packagedCandidateNames.has(candidate.name)) ?? [],
               platformParties: persisted.platformParties?.filter((party) => !packagedPartyAbbreviations.has(party.abbreviation)) ?? [],
@@ -500,6 +568,7 @@ export const useOpsStore = create<OpsState>()(
           creatorAccount: currentState.creatorAccount,
           staffPasswords: {},
           approvedSurveySlugs: sanitizedPersisted.approvedSurveySlugs ?? [],
+          liveVoterRegions: sanitizedPersisted.liveVoterRegions ?? [],
           candidateLoginAccounts
         };
       }

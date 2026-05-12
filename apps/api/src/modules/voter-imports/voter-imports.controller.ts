@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Post } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
-import { IsOptional, IsString, MinLength } from "class-validator";
+import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { GeoLevel, Prisma } from "@prisma/client";
+import { IsArray, IsOptional, IsString, MinLength } from "class-validator";
 import { PDFParse } from "pdf-parse";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -18,6 +18,11 @@ class VoterImportUploadDto {
   sourceName?: string;
 }
 
+class ApplyVoterImportDto {
+  @IsArray()
+  regions!: Array<{ name: string; registeredVoters: number }>;
+}
+
 @Controller("public/voter-imports")
 export class VoterImportsController {
   private readonly platformSlug = "house-aurelius-platform";
@@ -31,6 +36,21 @@ export class VoterImportsController {
       where: { tenantId: tenant.id },
       orderBy: { importedAt: "desc" },
       take: 20
+    });
+  }
+
+  @Get("gis-regions")
+  async listGisRegions() {
+    const tenant = await this.ensurePlatformTenant();
+    return this.prisma.geoRegion.findMany({
+      where: {
+        tenantId: tenant.id,
+        properties: {
+          path: ["source"],
+          equals: "voter-register-import"
+        }
+      },
+      orderBy: [{ registeredVoters: "desc" }, { name: "asc" }]
     });
   }
 
@@ -53,7 +73,7 @@ export class VoterImportsController {
         status,
         rowsParsed: findings.rowsParsed,
         votersTotal: findings.votersTotal,
-        errors: findings.errors as Prisma.InputJsonValue
+        errors: { errors: findings.errors, regions: findings.regions } as Prisma.InputJsonValue
       }
     });
 
@@ -67,6 +87,67 @@ export class VoterImportsController {
       regions: findings.regions,
       errors: findings.errors,
       importedAt: record.importedAt
+    };
+  }
+
+  @Post(":id/apply")
+  async applyImport(@Param("id") id: string, @Body() body: ApplyVoterImportDto) {
+    const tenant = await this.ensurePlatformTenant();
+    const record = await this.prisma.voterRegisterImport.findFirst({
+      where: { id, tenantId: tenant.id }
+    });
+    if (!record) {
+      return { ok: false, message: "Voter register import was not found." };
+    }
+
+    const regions = this.normalizeRegions(body.regions);
+    const appliedRegions = await this.prisma.$transaction(
+      regions.map((region) =>
+        this.prisma.geoRegion.upsert({
+          where: { tenantId_code: { tenantId: tenant.id, code: this.regionCode(region.name) } },
+          update: {
+            name: region.name,
+            level: GeoLevel.POLLING_STATION,
+            registeredVoters: region.registeredVoters,
+            properties: {
+              source: "voter-register-import",
+              sourceImportId: record.id,
+              sourceFileName: record.fileName,
+              intelligenceStatus: "actionable"
+            } as Prisma.InputJsonValue
+          },
+          create: {
+            tenantId: tenant.id,
+            code: this.regionCode(region.name),
+            name: region.name,
+            level: GeoLevel.POLLING_STATION,
+            registeredVoters: region.registeredVoters,
+            properties: {
+              source: "voter-register-import",
+              sourceImportId: record.id,
+              sourceFileName: record.fileName,
+              intelligenceStatus: "actionable"
+            } as Prisma.InputJsonValue
+          }
+        })
+      )
+    );
+
+    await this.prisma.voterRegisterImport.update({
+      where: { id: record.id },
+      data: { status: "APPLIED_TO_GIS" }
+    });
+
+    return {
+      ok: true,
+      status: "APPLIED_TO_GIS",
+      regionsApplied: appliedRegions.length,
+      votersTotal: appliedRegions.reduce((sum, region) => sum + (region.registeredVoters ?? 0), 0),
+      regions: appliedRegions.map((region) => ({
+        code: region.code,
+        name: region.name,
+        registeredVoters: region.registeredVoters ?? 0
+      }))
     };
   }
 
@@ -104,6 +185,26 @@ export class VoterImportsController {
       regions: regions.slice(0, 100),
       errors
     };
+  }
+
+  private normalizeRegions(regions: Array<{ name: string; registeredVoters: number }> = []) {
+    const seen = new Map<string, { name: string; registeredVoters: number }>();
+    for (const region of regions) {
+      const name = String(region.name ?? "").replace(/\s+/g, " ").trim();
+      const registeredVoters = Number(region.registeredVoters);
+      if (!name || !Number.isFinite(registeredVoters) || registeredVoters < 1) continue;
+      const key = this.regionCode(name);
+      const existing = seen.get(key);
+      seen.set(key, {
+        name,
+        registeredVoters: (existing?.registeredVoters ?? 0) + Math.round(registeredVoters)
+      });
+    }
+    return [...seen.values()].slice(0, 500);
+  }
+
+  private regionCode(name: string) {
+    return name.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 58) || `REGION-${Date.now()}`;
   }
 
   private async ensurePlatformTenant() {
