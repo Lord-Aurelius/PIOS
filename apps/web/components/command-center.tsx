@@ -693,7 +693,7 @@ function CommandModule({
               </div>
             </div>
             <div className="grid gap-0 xl:grid-cols-[1fr_300px]">
-              <div className="flex min-h-[560px] flex-col overflow-hidden bg-[#07101d] sm:min-h-[640px] 2xl:min-h-[760px]">
+              <div className="flex min-h-[700px] flex-col overflow-hidden bg-[#07101d] sm:min-h-[780px] 2xl:min-h-[880px]">
                 <div className="relative z-30 border-b border-white/10 bg-slate-950/94 p-4 backdrop-blur">
                   <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                     <div className="flex flex-wrap gap-2">
@@ -723,7 +723,7 @@ function CommandModule({
                     </div>
                   </div>
                 </div>
-                <div className="map-grid relative min-h-[420px] flex-1 overflow-hidden">
+                <div className="map-grid relative min-h-[560px] flex-1 overflow-hidden">
                   <div className="absolute inset-0">
                     <LeafletPoliticalMap
                       regions={regionsForLevel}

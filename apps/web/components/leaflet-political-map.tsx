@@ -16,12 +16,34 @@ type VisitRecord = {
   y: number;
 };
 
+const kenyaBounds = {
+  south: -4.9,
+  north: 4.9,
+  west: 33.9,
+  east: 41.95
+};
+
 function boundsFromBoundary(boundary?: Array<{ x: number; y: number }>): LatLngExpression[] {
   return (boundary ?? []).map((point) => [point.y, point.x]);
 }
 
 function positionFromPercent(x: number, y: number): LatLngExpression {
-  return [y, x];
+  const latitude = kenyaBounds.north - (y / 100) * (kenyaBounds.north - kenyaBounds.south);
+  const longitude = kenyaBounds.west + (x / 100) * (kenyaBounds.east - kenyaBounds.west);
+  return [latitude, longitude];
+}
+
+function centerFromBoundary(boundary?: Array<{ x: number; y: number }>): LatLngExpression | null {
+  if (!boundary?.length) return null;
+  const center = boundary.reduce(
+    (sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }),
+    { x: 0, y: 0 }
+  );
+  return [center.y / boundary.length, center.x / boundary.length];
+}
+
+function regionCenter(region: Region): LatLngExpression {
+  return centerFromBoundary(region.boundary) ?? positionFromPercent(region.x, region.y);
 }
 
 function regionFill(region: Region) {
@@ -147,10 +169,13 @@ export function LeafletPoliticalMap({
         />
       </Pane>
       <ViewportController contestArea={contestArea} regions={regions} />
+      <Pane name="political-regions" style={{ zIndex: 430 }} />
+      <Pane name="political-markers" style={{ zIndex: 620 }} />
       {regions.map((region) =>
         region.boundary?.length ? (
           <Polygon
             key={region.code}
+            pane="political-regions"
             positions={boundsFromBoundary(region.boundary)}
             pathOptions={{
               color: selectedRegion.code === region.code ? "#0f172a" : "#334155",
@@ -172,7 +197,8 @@ export function LeafletPoliticalMap({
         ) : (
           <CircleMarker
             key={region.code}
-            center={positionFromPercent(region.x, region.y)}
+            pane="political-regions"
+            center={regionCenter(region)}
             radius={regionRadius(region, selectedRegion.code === region.code)}
             pathOptions={{
               color: selectedRegion.code === region.code ? "#ffffff" : "#e2e8f0",
@@ -194,12 +220,22 @@ export function LeafletPoliticalMap({
         )
       )}
       {visits.map((visit, index) => (
-        <Marker key={visit.id ?? `${visit.title}-${index}`} position={positionFromPercent(visit.x, visit.y)} icon={visitIcon}>
+        <Marker
+          key={visit.id ?? `${visit.title}-${index}`}
+          pane="political-markers"
+          position={regionCenter(regions.find((region) => region.name === visit.region) ?? { code: "", name: visit.region, support: 0, risk: 0, momentum: 0, registeredVoters: 0, x: visit.x, y: visit.y })}
+          icon={visitIcon}
+        >
           <Popup>{visit.title}</Popup>
         </Marker>
       ))}
       {attendees.map((attendee) => (
-        <Marker key={`${attendee.phone}-${attendee.attendedAt}`} position={positionFromPercent(attendee.x, attendee.y)} icon={attendeeIcon}>
+        <Marker
+          key={`${attendee.phone}-${attendee.attendedAt}`}
+          pane="political-markers"
+          position={regionCenter(regions.find((region) => region.name === attendee.location) ?? { code: "", name: attendee.location, support: 0, risk: 0, momentum: 0, registeredVoters: 0, x: attendee.x, y: attendee.y })}
+          icon={attendeeIcon}
+        >
           <Popup>
             <strong>{attendee.name}</strong>
             <br />
