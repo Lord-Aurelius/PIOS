@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
-import L, { DivIcon, LatLngBoundsExpression, LatLngExpression, latLngBounds } from "leaflet";
+import { useEffect, useMemo, useState } from "react";
+import L, { DivIcon, LatLngExpression, latLngBounds } from "leaflet";
 import { CircleMarker, MapContainer, Marker, Pane, Polygon, Popup, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
-import { MeetingAttendee, Region } from "@/lib/ops-store";
+import { GisMapLevel, MeetingAttendee, Region } from "@/lib/ops-store";
 
 type VisitRecord = {
   id?: string;
@@ -73,6 +73,34 @@ function regionRadius(region: Region, selected: boolean) {
   return selected ? base + 4 : base;
 }
 
+function contestAreaQuery(contestArea: string, mapLevel: GisMapLevel) {
+  const area = contestArea.trim();
+  if (!area) return "";
+  const levelLabel: Record<GisMapLevel, string> = {
+    county: "county",
+    constituency: "constituency",
+    ward: "ward",
+    pollingStation: ""
+  };
+  return [area, levelLabel[mapLevel], "Kenya"].filter(Boolean).join(", ");
+}
+
+function ringFromGeoJson(geojson: unknown): LatLngExpression[] | null {
+  const geometry = geojson as {
+    type?: string;
+    coordinates?: number[][][] | number[][][][];
+  };
+  if (!geometry?.type || !geometry.coordinates) return null;
+  const firstRing =
+    geometry.type === "Polygon"
+      ? (geometry.coordinates as number[][][])[0]
+      : geometry.type === "MultiPolygon"
+        ? (geometry.coordinates as number[][][][])[0]?.[0]
+        : null;
+  if (!firstRing?.length) return null;
+  return firstRing.map(([longitude, latitude]) => [latitude, longitude]);
+}
+
 const visitIcon = new DivIcon({
   html: '<div style="width:18px;height:18px;border-radius:999px;background:#fbbf24;border:2px solid #fff7ed;box-shadow:0 0 0 4px rgba(251,191,36,.18)"></div>',
   className: "",
@@ -89,9 +117,11 @@ const attendeeIcon = new DivIcon({
 
 function ViewportController({
   contestArea,
+  mapLevel,
   regions
 }: {
   contestArea: string;
+  mapLevel: GisMapLevel;
   regions: Region[];
 }) {
   const map = useMap();
@@ -105,7 +135,7 @@ function ViewportController({
   useEffect(() => {
     let cancelled = false;
     async function focusArea() {
-      const query = contestArea.trim();
+      const query = contestAreaQuery(contestArea, mapLevel);
       if (!query) {
         if (regionBounds) map.fitBounds(regionBounds, { padding: [28, 28] });
         else map.setView([-0.2, 37.8], 6);
@@ -138,9 +168,62 @@ function ViewportController({
     return () => {
       cancelled = true;
     };
-  }, [contestArea, map, regionBounds]);
+  }, [contestArea, map, mapLevel, regionBounds]);
 
   return null;
+}
+
+function ContestBoundaryLayer({
+  contestArea,
+  mapLevel
+}: {
+  contestArea: string;
+  mapLevel: GisMapLevel;
+}) {
+  const [boundary, setBoundary] = useState<LatLngExpression[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadBoundary() {
+      const query = contestAreaQuery(contestArea, mapLevel);
+      if (!query) {
+        setBoundary(null);
+        return;
+      }
+      try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&polygon_geojson=1&limit=1&countrycodes=ke&q=${encodeURIComponent(query)}`);
+        const result = response.ok ? ((await response.json()) as Array<{ geojson?: unknown }>) : [];
+        if (cancelled) return;
+        setBoundary(ringFromGeoJson(result[0]?.geojson) ?? null);
+      } catch {
+        if (!cancelled) setBoundary(null);
+      }
+    }
+    loadBoundary();
+    return () => {
+      cancelled = true;
+    };
+  }, [contestArea, mapLevel]);
+
+  if (!boundary?.length) return null;
+  return (
+    <Polygon
+      pane="contest-boundary"
+      positions={boundary}
+      pathOptions={{
+        color: "#f97316",
+        fillColor: "#f97316",
+        fillOpacity: 0.07,
+        lineCap: "round",
+        lineJoin: "round",
+        weight: 5
+      }}
+    >
+      <Tooltip sticky direction="top" className="political-map-label">
+        Contest boundary: {contestArea}
+      </Tooltip>
+    </Polygon>
+  );
 }
 
 function VisitToggleHandler({
@@ -169,7 +252,8 @@ export function LeafletPoliticalMap({
   onToggleVisit,
   visits,
   attendees,
-  contestArea
+  contestArea,
+  mapLevel
 }: {
   regions: Region[];
   selectedRegion: Region;
@@ -178,6 +262,7 @@ export function LeafletPoliticalMap({
   visits: VisitRecord[];
   attendees: MeetingAttendee[];
   contestArea: string;
+  mapLevel: GisMapLevel;
 }) {
   const hasResolvedPoint = regions.some((region) => region.latitude !== undefined && region.longitude !== undefined);
   return (
@@ -201,9 +286,11 @@ export function LeafletPoliticalMap({
           url="https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png"
         />
       </Pane>
-      <ViewportController contestArea={contestArea} regions={regions} />
+      <Pane name="contest-boundary" style={{ zIndex: 420 }} />
+      <ViewportController contestArea={contestArea} mapLevel={mapLevel} regions={regions} />
+      <ContestBoundaryLayer contestArea={contestArea} mapLevel={mapLevel} />
       <VisitToggleHandler onToggleVisit={onToggleVisit} />
-      <Pane name="political-regions" style={{ zIndex: 430 }} />
+      <Pane name="political-regions" style={{ zIndex: 460 }} />
       <Pane name="political-markers" style={{ zIndex: 620 }} />
       {regions.map((region) =>
         region.boundary?.length ? (
@@ -212,10 +299,10 @@ export function LeafletPoliticalMap({
             pane="political-regions"
             positions={boundsFromBoundary(region.boundary)}
             pathOptions={{
-              color: selectedRegion.code === region.code ? "#0f172a" : "#334155",
+              color: selectedRegion.code === region.code ? "#facc15" : "#020617",
               weight: regionWeight(region, selectedRegion.code === region.code),
               fillColor: regionFill(region),
-              fillOpacity: selectedRegion.code === region.code ? 0.62 : 0.42
+              fillOpacity: selectedRegion.code === region.code ? 0.7 : 0.5
             }}
             eventHandlers={{
               click: () => onSelectRegion(region),

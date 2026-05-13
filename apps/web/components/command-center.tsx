@@ -682,36 +682,94 @@ function CommandModule({
   const commandReports = packagedDataEnabled ? commandData.reports : [];
   const activeLayer = gisDataLayers.find((layer) => layer.id === activeGisLayerId);
   const contestAreaLabel = contestArea || activeLayer?.contestArea || "Kenya";
-  const regionsForLevel = activeLayer && activeLayer.level !== mapLevel ? [] : mapRegions;
-  const [geoResolveStatus, setGeoResolveStatus] = useState("");
+  const regionsForLevel = activeLayer ? activeLayer.regions : mapRegions;
+  const [geoResolveProgress, setGeoResolveProgress] = useState({
+    current: 0,
+    currentName: "",
+    failed: 0,
+    matched: 0,
+    message: "",
+    running: false,
+    total: 0
+  });
+  const geoResolvePercent = geoResolveProgress.total ? Math.round((geoResolveProgress.current / geoResolveProgress.total) * 100) : 0;
 
   async function resolveActiveLayerLocations() {
     if (!activeLayer?.regions.length) return;
-    setGeoResolveStatus("Resolving polling station and ward names...");
     const resolvedRegions: Region[] = [];
-    for (const region of activeLayer.regions) {
+    let matched = 0;
+    let failed = 0;
+    setGeoResolveProgress({
+      current: 0,
+      currentName: "",
+      failed: 0,
+      matched: 0,
+      message: "Starting polling-station and ward name resolution...",
+      running: true,
+      total: activeLayer.regions.length
+    });
+    for (const [index, region] of activeLayer.regions.entries()) {
+      setGeoResolveProgress({
+        current: index,
+        currentName: region.name,
+        failed,
+        matched,
+        message: `Searching ${region.name} inside ${contestAreaLabel}`,
+        running: true,
+        total: activeLayer.regions.length
+      });
       if (region.latitude !== undefined && region.longitude !== undefined) {
         resolvedRegions.push(region);
+        matched += 1;
+        setGeoResolveProgress({
+          current: index + 1,
+          currentName: region.name,
+          failed,
+          matched,
+          message: `${region.name} already has map coordinates.`,
+          running: true,
+          total: activeLayer.regions.length
+        });
         continue;
       }
       try {
-        const query = [region.name, contestAreaLabel, "Kenya"].filter(Boolean).join(", ");
+        const query = [region.name, contestAreaLabel, activeLayer.level === "pollingStation" ? "polling station" : activeLayer.level, "Kenya"].filter(Boolean).join(", ");
         const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ke&q=${encodeURIComponent(query)}`);
         const results = response.ok ? ((await response.json()) as Array<{ lat?: string; lon?: string }>) : [];
         const match = results[0];
+        if (match?.lat && match.lon) matched += 1;
+        else failed += 1;
         resolvedRegions.push(
           match?.lat && match.lon
             ? { ...region, latitude: Number(match.lat), longitude: Number(match.lon) }
             : region
         );
       } catch {
+        failed += 1;
         resolvedRegions.push(region);
       }
-      await new Promise((resolve) => window.setTimeout(resolve, 250));
+      setGeoResolveProgress({
+        current: index + 1,
+        currentName: region.name,
+        failed,
+        matched,
+        message: `${(index + 1).toLocaleString()} of ${activeLayer.regions.length.toLocaleString()} searched.`,
+        running: true,
+        total: activeLayer.regions.length
+      });
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
     }
     updateGisLayerRegions(activeLayer.id, resolvedRegions);
     const count = resolvedRegions.filter((region) => region.latitude !== undefined && region.longitude !== undefined).length;
-    setGeoResolveStatus(`${count.toLocaleString()} of ${resolvedRegions.length.toLocaleString()} areas resolved to map locations.`);
+    setGeoResolveProgress({
+      current: resolvedRegions.length,
+      currentName: "",
+      failed: resolvedRegions.length - count,
+      matched: count,
+      message: `${count.toLocaleString()} of ${resolvedRegions.length.toLocaleString()} areas resolved to map locations.`,
+      running: false,
+      total: resolvedRegions.length
+    });
   }
 
   return (
@@ -771,14 +829,10 @@ function CommandModule({
                       visits={visits}
                       attendees={meetingAttendees}
                       contestArea={contestAreaLabel}
+                      mapLevel={mapLevel}
                     />
                   </div>
                 </div>
-                {activeLayer && activeLayer.level !== mapLevel ? (
-                  <div className="mx-4 my-3 rounded-md border border-amber-300/30 bg-slate-950/90 p-3 text-sm text-amber-100">
-                    The active layer is mapped at {activeLayer.level}. Switch back to that level, or upload official boundaries for this zoom level.
-                  </div>
-                ) : null}
               </div>
               <aside className="border-t border-white/10 p-4 xl:border-l xl:border-t-0">
                 <div className="mb-4 rounded-md border border-white/10 bg-white/[.035] p-3">
@@ -796,16 +850,38 @@ function CommandModule({
                           Delete layer
                         </button>
                         {layer.id === activeGisLayerId ? (
-                          <button onClick={resolveActiveLayerLocations} className="mt-2 flex h-8 items-center gap-2 rounded-md border border-cyan-300/40 px-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/10">
+                          <button
+                            onClick={resolveActiveLayerLocations}
+                            disabled={geoResolveProgress.running}
+                            className="mt-2 flex h-8 items-center gap-2 rounded-md border border-cyan-300/40 px-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/10 disabled:cursor-progress disabled:opacity-60"
+                          >
                             <MapPin size={13} />
-                            Resolve map positions
+                            {geoResolveProgress.running ? "Resolving..." : "Resolve map positions"}
                           </button>
                         ) : null}
                       </div>
                     ))}
                     {!gisDataLayers.length ? <p className="text-xs leading-5 text-slate-500">No candidate GIS layers yet.</p> : null}
                   </div>
-                  {geoResolveStatus ? <p className="mt-3 text-xs leading-5 text-cyan-100">{geoResolveStatus}</p> : null}
+                  {geoResolveProgress.total ? (
+                    <div className="mt-3 rounded-md border border-cyan-300/20 bg-cyan-300/10 p-3">
+                      <div className="flex items-center justify-between text-xs font-semibold text-cyan-100">
+                        <span>{geoResolveProgress.message}</span>
+                        <span>{geoResolvePercent}%</span>
+                      </div>
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-900">
+                        <div className="h-full bg-cyan-300 transition-all" style={{ width: `${geoResolvePercent}%` }} />
+                      </div>
+                      <div className="mt-2 grid grid-cols-3 gap-2 text-[11px] text-slate-300">
+                        <span>Searched {geoResolveProgress.current.toLocaleString()} / {geoResolveProgress.total.toLocaleString()}</span>
+                        <span>Matched {geoResolveProgress.matched.toLocaleString()}</span>
+                        <span>Unresolved {geoResolveProgress.failed.toLocaleString()}</span>
+                      </div>
+                      {geoResolveProgress.running && geoResolveProgress.currentName ? (
+                        <p className="mt-2 text-[11px] text-slate-400">Current lookup: {geoResolveProgress.currentName}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
                 <p className="text-sm text-slate-400">Selected region</p>
                 <h3 className="mt-1 text-xl font-semibold text-white">{selectedRegion.name}</h3>
