@@ -903,7 +903,7 @@ function CommandModule({
                     </div>
                   ) : null}
                   <div className="mt-3 rounded-md border border-white/10 bg-white/[.035] p-3 text-xs leading-5 text-slate-400">
-                    Polling-station matching uses public map search. Some official IEBC stations are stored as schools, churches, halls, or local facilities, so unresolved rows usually mean the public map has no matching facility record or the spelling differs from the register.
+                    The map now uses detailed OpenStreetMap tiles. Zoom close to inspect school, church, hall, market, and building labels. Polling-station matching still depends on whether that facility exists in public map search and whether its spelling matches the register.
                   </div>
                 </div>
                 <p className="text-sm text-slate-400">Selected region</p>

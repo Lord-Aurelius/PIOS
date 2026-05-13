@@ -270,22 +270,17 @@ export function LeafletPoliticalMap({
       center={[-0.2, 37.8]}
       zoom={6}
       minZoom={5}
-      maxZoom={14}
-      zoomControl={false}
+      maxZoom={19}
+      zoomControl
       className="h-full w-full"
       attributionControl
       doubleClickZoom={false}
     >
       <TileLayer
-        attribution='&copy; OpenStreetMap contributors &copy; CARTO'
-        url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
+        attribution='&copy; OpenStreetMap contributors'
+        maxZoom={19}
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      <Pane name="basemap-labels" style={{ zIndex: 350, pointerEvents: "none" }}>
-        <TileLayer
-          attribution='&copy; OpenStreetMap contributors &copy; CARTO'
-          url="https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png"
-        />
-      </Pane>
       <Pane name="contest-boundary" style={{ zIndex: 420 }} />
       <ViewportController contestArea={contestArea} mapLevel={mapLevel} regions={regions} />
       <ContestBoundaryLayer contestArea={contestArea} mapLevel={mapLevel} />
