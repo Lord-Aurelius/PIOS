@@ -98,6 +98,19 @@ export type MeetingAttendee = {
   attendedAt: string;
 };
 
+export type CandidateVisitRecord = {
+  id?: string;
+  title: string;
+  type: string;
+  region: string;
+  attendance: number;
+  sentiment: number;
+  x: number;
+  y: number;
+  latitude?: number;
+  longitude?: number;
+};
+
 export type CreatorAccount = {
   userKey: string;
   username: string;
@@ -131,7 +144,7 @@ type OpsState = {
   candidateName: string;
   campaignSlogan: string;
   brandColor: string;
-  customVisits: Array<{ id?: string; title: string; type: string; region: string; attendance: number; sentiment: number; x: number; y: number }>;
+  customVisits: CandidateVisitRecord[];
   onboardedCandidates: Array<{ name: string; office: string; party: string; region: string }>;
   candidateLoginAccounts: CandidateLoginAccount[];
   deletedCandidateNames: string[];
@@ -164,11 +177,13 @@ type OpsState = {
   setLiveVoterRegions: (regions: Region[]) => void;
   applyVoterImportToMap: (id: string, regions?: ImportedVoterRegion[]) => Region[];
   addGisDataLayer: (layer: Omit<GisDataLayer, "id" | "createdAt">) => string;
+  updateGisLayerRegions: (id: string, regions: Region[]) => void;
   deleteGisDataLayer: (id: string) => void;
   setActiveGisLayer: (id: string) => void;
   setMapLevel: (level: GisMapLevel) => void;
   addCandidate: (candidate: { name: string; office: string; party: string; region: string; userKey: string; username: string; password: string }) => void;
   addVisitToSelectedRegion: () => void;
+  toggleCandidateVisitAtPoint: (point: { latitude: number; longitude: number; region?: string; x?: number; y?: number }) => void;
   removeCandidateVisit: (visitKey: string) => void;
   updateCampaignProfile: (profile: { campaignName: string; candidateName: string; campaignSlogan: string; brandColor: string }) => void;
   changePassword: (target: string) => void;
@@ -444,6 +459,12 @@ export const useOpsStore = create<OpsState>()(
     }));
     return id;
   },
+  updateGisLayerRegions: (id, regions) =>
+    set((state) => ({
+      gisDataLayers: state.gisDataLayers.map((layer) => (layer.id === id ? { ...layer, regions } : layer)),
+      liveVoterRegions: state.activeGisLayerId === id ? regions : state.liveVoterRegions,
+      selectedRegion: state.activeGisLayerId === id ? regions[0] ?? state.selectedRegion : state.selectedRegion
+    })),
   deleteGisDataLayer: (id) =>
     set((state) => {
       const remainingLayers = state.gisDataLayers.filter((layer) => layer.id !== id);
@@ -521,10 +542,43 @@ export const useOpsStore = create<OpsState>()(
                 attendance: 0,
                 sentiment: 0,
                 x: derivedRegion.x,
-                y: derivedRegion.y
+                y: derivedRegion.y,
+                latitude: derivedRegion.latitude,
+                longitude: derivedRegion.longitude
               },
               ...state.customVisits
             ]
+      };
+    }),
+  toggleCandidateVisitAtPoint: (point) =>
+    set((state) => {
+      const closeVisit = state.customVisits.find((visit) => {
+        if (visit.latitude === undefined || visit.longitude === undefined) return false;
+        const distance = Math.hypot(visit.latitude - point.latitude, visit.longitude - point.longitude);
+        return distance < 0.012;
+      });
+      if (closeVisit?.id) {
+        return { customVisits: state.customVisits.filter((visit) => visit.id !== closeVisit.id) };
+      }
+      const region =
+        point.region?.trim() ||
+        (state.selectedRegion.name !== emptyRegion.name ? state.selectedRegion.name : state.contestArea || "Visited location");
+      return {
+        customVisits: [
+          {
+            id: `visit-${Date.now()}`,
+            title: `${state.candidateName} visit to ${region}`,
+            type: "Candidate visit",
+            region,
+            attendance: 0,
+            sentiment: 0,
+            x: point.x ?? state.selectedRegion.x,
+            y: point.y ?? state.selectedRegion.y,
+            latitude: point.latitude,
+            longitude: point.longitude
+          },
+          ...state.customVisits
+        ]
       };
     }),
   removeCandidateVisit: (visitKey) =>

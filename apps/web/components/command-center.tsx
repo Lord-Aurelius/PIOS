@@ -36,7 +36,7 @@ import type React from "react";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { commandData, emptyRegion } from "@/lib/production-defaults";
-import { CandidateLoginAccount, CreatorAccount, GisDataLayer, GisMapLevel, InventoryItem, MeetingAttendee, ModuleKey, Region, ResourceAllocation, StaffMember, useOpsStore, VoterImportJob, WorkspaceRole } from "@/lib/ops-store";
+import { CandidateLoginAccount, CandidateVisitRecord, CreatorAccount, GisDataLayer, GisMapLevel, InventoryItem, MeetingAttendee, ModuleKey, Region, ResourceAllocation, StaffMember, useOpsStore, VoterImportJob, WorkspaceRole } from "@/lib/ops-store";
 import {
   defaultSurveyQuestions,
   questionTypes,
@@ -121,11 +121,13 @@ export function CommandCenter() {
     setLiveVoterRegions,
     applyVoterImportToMap,
     addGisDataLayer,
+    updateGisLayerRegions,
     deleteGisDataLayer,
     setActiveGisLayer,
     setMapLevel,
     addCandidate,
     addVisitToSelectedRegion,
+    toggleCandidateVisitAtPoint,
     removeCandidateVisit,
     updateCampaignProfile,
     changePassword,
@@ -366,11 +368,13 @@ export function CommandCenter() {
             setMapLevel={setMapLevel}
             setContestArea={setContestArea}
             setActiveGisLayer={setActiveGisLayer}
+            updateGisLayerRegions={updateGisLayerRegions}
             deleteGisDataLayer={deleteGisDataLayer}
             customVisits={customVisits}
             meetingAttendees={meetingAttendees}
             packagedDataEnabled={packagedDataEnabled}
             addVisitToSelectedRegion={addVisitToSelectedRegion}
+            toggleCandidateVisitAtPoint={toggleCandidateVisitAtPoint}
             removeCandidateVisit={removeCandidateVisit}
           />
         ) : null}
@@ -642,11 +646,13 @@ function CommandModule({
   setMapLevel,
   setContestArea,
   setActiveGisLayer,
+  updateGisLayerRegions,
   deleteGisDataLayer,
   customVisits,
   meetingAttendees,
   packagedDataEnabled,
   addVisitToSelectedRegion,
+  toggleCandidateVisitAtPoint,
   removeCandidateVisit
 }: {
   selectedRegion: Region;
@@ -660,11 +666,13 @@ function CommandModule({
   setMapLevel: (level: GisMapLevel) => void;
   setContestArea: (contestArea: string) => void;
   setActiveGisLayer: (id: string) => void;
+  updateGisLayerRegions: (id: string, regions: Region[]) => void;
   deleteGisDataLayer: (id: string) => void;
-  customVisits: Array<{ id?: string; title: string; type: string; region: string; attendance: number; sentiment: number; x: number; y: number }>;
+  customVisits: CandidateVisitRecord[];
   meetingAttendees: MeetingAttendee[];
   packagedDataEnabled: boolean;
   addVisitToSelectedRegion: () => void;
+  toggleCandidateVisitAtPoint: (point: { latitude: number; longitude: number; region?: string; x?: number; y?: number }) => void;
   removeCandidateVisit: (visitKey: string) => void;
 }) {
   const visits = [...customVisits, ...(packagedDataEnabled ? commandData.candidateVisits : [])];
@@ -675,6 +683,36 @@ function CommandModule({
   const activeLayer = gisDataLayers.find((layer) => layer.id === activeGisLayerId);
   const contestAreaLabel = contestArea || activeLayer?.contestArea || "Kenya";
   const regionsForLevel = activeLayer && activeLayer.level !== mapLevel ? [] : mapRegions;
+  const [geoResolveStatus, setGeoResolveStatus] = useState("");
+
+  async function resolveActiveLayerLocations() {
+    if (!activeLayer?.regions.length) return;
+    setGeoResolveStatus("Resolving polling station and ward names...");
+    const resolvedRegions: Region[] = [];
+    for (const region of activeLayer.regions) {
+      if (region.latitude !== undefined && region.longitude !== undefined) {
+        resolvedRegions.push(region);
+        continue;
+      }
+      try {
+        const query = [region.name, contestAreaLabel, "Kenya"].filter(Boolean).join(", ");
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ke&q=${encodeURIComponent(query)}`);
+        const results = response.ok ? ((await response.json()) as Array<{ lat?: string; lon?: string }>) : [];
+        const match = results[0];
+        resolvedRegions.push(
+          match?.lat && match.lon
+            ? { ...region, latitude: Number(match.lat), longitude: Number(match.lon) }
+            : region
+        );
+      } catch {
+        resolvedRegions.push(region);
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
+    updateGisLayerRegions(activeLayer.id, resolvedRegions);
+    const count = resolvedRegions.filter((region) => region.latitude !== undefined && region.longitude !== undefined).length;
+    setGeoResolveStatus(`${count.toLocaleString()} of ${resolvedRegions.length.toLocaleString()} areas resolved to map locations.`);
+  }
 
   return (
     <>
@@ -729,6 +767,7 @@ function CommandModule({
                       regions={regionsForLevel}
                       selectedRegion={selectedRegion}
                       onSelectRegion={setSelectedRegion}
+                      onToggleVisit={toggleCandidateVisitAtPoint}
                       visits={visits}
                       attendees={meetingAttendees}
                       contestArea={contestAreaLabel}
@@ -756,10 +795,17 @@ function CommandModule({
                           <Trash2 size={13} />
                           Delete layer
                         </button>
+                        {layer.id === activeGisLayerId ? (
+                          <button onClick={resolveActiveLayerLocations} className="mt-2 flex h-8 items-center gap-2 rounded-md border border-cyan-300/40 px-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-300/10">
+                            <MapPin size={13} />
+                            Resolve map positions
+                          </button>
+                        ) : null}
                       </div>
                     ))}
                     {!gisDataLayers.length ? <p className="text-xs leading-5 text-slate-500">No candidate GIS layers yet.</p> : null}
                   </div>
+                  {geoResolveStatus ? <p className="mt-3 text-xs leading-5 text-cyan-100">{geoResolveStatus}</p> : null}
                 </div>
                 <p className="text-sm text-slate-400">Selected region</p>
                 <h3 className="mt-1 text-xl font-semibold text-white">{selectedRegion.name}</h3>

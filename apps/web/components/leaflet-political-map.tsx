@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from "react";
 import L, { DivIcon, LatLngBoundsExpression, LatLngExpression, latLngBounds } from "leaflet";
-import { CircleMarker, MapContainer, Marker, Pane, Polygon, Popup, TileLayer, Tooltip, useMap } from "react-leaflet";
+import { CircleMarker, MapContainer, Marker, Pane, Polygon, Popup, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
 import { MeetingAttendee, Region } from "@/lib/ops-store";
 
 type VisitRecord = {
@@ -14,6 +14,8 @@ type VisitRecord = {
   sentiment: number;
   x: number;
   y: number;
+  latitude?: number;
+  longitude?: number;
 };
 
 const kenyaBounds = {
@@ -33,6 +35,13 @@ function positionFromPercent(x: number, y: number): LatLngExpression {
   return [latitude, longitude];
 }
 
+function percentFromLatLng(latitude: number, longitude: number) {
+  return {
+    x: ((longitude - kenyaBounds.west) / (kenyaBounds.east - kenyaBounds.west)) * 100,
+    y: ((kenyaBounds.north - latitude) / (kenyaBounds.north - kenyaBounds.south)) * 100
+  };
+}
+
 function centerFromBoundary(boundary?: Array<{ x: number; y: number }>): LatLngExpression | null {
   if (!boundary?.length) return null;
   const center = boundary.reduce(
@@ -43,6 +52,7 @@ function centerFromBoundary(boundary?: Array<{ x: number; y: number }>): LatLngE
 }
 
 function regionCenter(region: Region): LatLngExpression {
+  if (region.latitude !== undefined && region.longitude !== undefined) return [region.latitude, region.longitude];
   return centerFromBoundary(region.boundary) ?? positionFromPercent(region.x, region.y);
 }
 
@@ -87,7 +97,7 @@ function ViewportController({
   const map = useMap();
   const regionBounds = useMemo(() => {
     const points = regions.flatMap((region) =>
-      region.boundary?.length ? boundsFromBoundary(region.boundary) : [positionFromPercent(region.x, region.y)]
+      region.boundary?.length ? boundsFromBoundary(region.boundary) : [regionCenter(region)]
     );
     return points.length ? latLngBounds(points as LatLngExpression[]) : undefined;
   }, [regions]);
@@ -133,10 +143,30 @@ function ViewportController({
   return null;
 }
 
+function VisitToggleHandler({
+  onToggleVisit
+}: {
+  onToggleVisit: (point: { latitude: number; longitude: number; x: number; y: number }) => void;
+}) {
+  useMapEvents({
+    dblclick(event) {
+      const point = percentFromLatLng(event.latlng.lat, event.latlng.lng);
+      onToggleVisit({
+        latitude: event.latlng.lat,
+        longitude: event.latlng.lng,
+        x: point.x,
+        y: point.y
+      });
+    }
+  });
+  return null;
+}
+
 export function LeafletPoliticalMap({
   regions,
   selectedRegion,
   onSelectRegion,
+  onToggleVisit,
   visits,
   attendees,
   contestArea
@@ -144,10 +174,12 @@ export function LeafletPoliticalMap({
   regions: Region[];
   selectedRegion: Region;
   onSelectRegion: (region: Region) => void;
+  onToggleVisit: (point: { latitude: number; longitude: number; region?: string; x?: number; y?: number }) => void;
   visits: VisitRecord[];
   attendees: MeetingAttendee[];
   contestArea: string;
 }) {
+  const hasResolvedPoint = regions.some((region) => region.latitude !== undefined && region.longitude !== undefined);
   return (
     <MapContainer
       center={[-0.2, 37.8]}
@@ -157,6 +189,7 @@ export function LeafletPoliticalMap({
       zoomControl={false}
       className="h-full w-full"
       attributionControl
+      doubleClickZoom={false}
     >
       <TileLayer
         attribution='&copy; OpenStreetMap contributors &copy; CARTO'
@@ -169,6 +202,7 @@ export function LeafletPoliticalMap({
         />
       </Pane>
       <ViewportController contestArea={contestArea} regions={regions} />
+      <VisitToggleHandler onToggleVisit={onToggleVisit} />
       <Pane name="political-regions" style={{ zIndex: 430 }} />
       <Pane name="political-markers" style={{ zIndex: 620 }} />
       {regions.map((region) =>
@@ -183,7 +217,15 @@ export function LeafletPoliticalMap({
               fillColor: regionFill(region),
               fillOpacity: selectedRegion.code === region.code ? 0.62 : 0.42
             }}
-            eventHandlers={{ click: () => onSelectRegion(region) }}
+            eventHandlers={{
+              click: () => onSelectRegion(region),
+              dblclick: (event) => {
+                L.DomEvent.stop(event);
+                const center = regionCenter(region) as [number, number];
+                const point = percentFromLatLng(center[0], center[1]);
+                onToggleVisit({ latitude: center[0], longitude: center[1], region: region.name, x: point.x, y: point.y });
+              }
+            }}
           >
             <Tooltip sticky permanent direction="center" className="political-map-label">
               {region.name}
@@ -194,7 +236,7 @@ export function LeafletPoliticalMap({
               Registered voters: {region.registeredVoters.toLocaleString()}
             </Popup>
           </Polygon>
-        ) : (
+        ) : region.latitude !== undefined && region.longitude !== undefined ? (
           <CircleMarker
             key={region.code}
             pane="political-regions"
@@ -206,7 +248,46 @@ export function LeafletPoliticalMap({
               fillColor: regionFill(region),
               fillOpacity: 0.8
             }}
-            eventHandlers={{ click: () => onSelectRegion(region) }}
+            eventHandlers={{
+              click: () => onSelectRegion(region),
+              dblclick: (event) => {
+                L.DomEvent.stop(event);
+                const center = regionCenter(region) as [number, number];
+                const point = percentFromLatLng(center[0], center[1]);
+                onToggleVisit({ latitude: center[0], longitude: center[1], region: region.name, x: point.x, y: point.y });
+              }
+            }}
+          >
+            <Tooltip sticky permanent direction="top" offset={[0, -8]} className="political-map-label">
+              {region.name}
+            </Tooltip>
+            <Popup>
+              <strong>{region.name}</strong>
+              <br />
+              Registered voters: {region.registeredVoters.toLocaleString()}
+            </Popup>
+          </CircleMarker>
+        ) : hasResolvedPoint ? null : (
+          <CircleMarker
+            key={region.code}
+            pane="political-regions"
+            center={regionCenter(region)}
+            radius={regionRadius(region, selectedRegion.code === region.code)}
+            pathOptions={{
+              color: selectedRegion.code === region.code ? "#ffffff" : "#e2e8f0",
+              weight: selectedRegion.code === region.code ? 3 : 1.5,
+              fillColor: regionFill(region),
+              fillOpacity: 0.45
+            }}
+            eventHandlers={{
+              click: () => onSelectRegion(region),
+              dblclick: (event) => {
+                L.DomEvent.stop(event);
+                const center = regionCenter(region) as [number, number];
+                const point = percentFromLatLng(center[0], center[1]);
+                onToggleVisit({ latitude: center[0], longitude: center[1], region: region.name, x: point.x, y: point.y });
+              }
+            }}
           >
             <Tooltip sticky permanent direction="top" offset={[0, -8]} className="political-map-label">
               {region.name}
@@ -223,8 +304,16 @@ export function LeafletPoliticalMap({
         <Marker
           key={visit.id ?? `${visit.title}-${index}`}
           pane="political-markers"
-          position={regionCenter(regions.find((region) => region.name === visit.region) ?? { code: "", name: visit.region, support: 0, risk: 0, momentum: 0, registeredVoters: 0, x: visit.x, y: visit.y })}
+          position={visit.latitude !== undefined && visit.longitude !== undefined ? [visit.latitude, visit.longitude] : regionCenter(regions.find((region) => region.name === visit.region) ?? { code: "", name: visit.region, support: 0, risk: 0, momentum: 0, registeredVoters: 0, x: visit.x, y: visit.y })}
           icon={visitIcon}
+          eventHandlers={{
+            dblclick: (event) => {
+              L.DomEvent.stop(event);
+              const position = event.target.getLatLng();
+              const point = percentFromLatLng(position.lat, position.lng);
+              onToggleVisit({ latitude: position.lat, longitude: position.lng, region: visit.region, x: point.x, y: point.y });
+            }
+          }}
         >
           <Popup>{visit.title}</Popup>
         </Marker>

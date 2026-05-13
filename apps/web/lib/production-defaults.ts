@@ -7,6 +7,8 @@ export type RegionRecord = {
   registeredVoters: number;
   x: number;
   y: number;
+  latitude?: number;
+  longitude?: number;
   boundary?: Array<{ x: number; y: number }>;
 };
 
