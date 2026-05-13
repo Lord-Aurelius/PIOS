@@ -693,44 +693,50 @@ function CommandModule({
               </div>
             </div>
             <div className="grid gap-0 xl:grid-cols-[1fr_300px]">
-              <div className="map-grid relative min-h-[560px] overflow-hidden bg-[#07101d] sm:min-h-[640px] 2xl:min-h-[760px]">
-                <div className="absolute left-4 top-4 z-20 flex flex-wrap gap-2">
-                  {mapLevels.map((level) => (
-                    <button
-                      key={level.key}
-                      onClick={() => setMapLevel(level.key)}
-                      className={`rounded-md border px-3 py-2 text-xs font-semibold ${
-                        mapLevel === level.key ? "border-cyan-200 bg-cyan-300 text-slate-950" : "border-white/10 bg-slate-950/80 text-slate-200 hover:bg-white/10"
-                      }`}
-                    >
-                      {level.label}
-                    </button>
-                  ))}
+              <div className="flex min-h-[560px] flex-col overflow-hidden bg-[#07101d] sm:min-h-[640px] 2xl:min-h-[760px]">
+                <div className="relative z-30 border-b border-white/10 bg-slate-950/94 p-4 backdrop-blur">
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="flex flex-wrap gap-2">
+                      {mapLevels.map((level) => (
+                        <button
+                          key={level.key}
+                          onClick={() => setMapLevel(level.key)}
+                          className={`rounded-md border px-3 py-2 text-xs font-semibold ${
+                            mapLevel === level.key ? "border-cyan-200 bg-cyan-300 text-slate-950" : "border-white/10 bg-slate-900 text-slate-200 hover:bg-white/10"
+                          }`}
+                        >
+                          {level.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="w-full max-w-xl rounded-md border border-white/10 bg-slate-950/80 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Contest Area</p>
+                      <input
+                        value={contestArea}
+                        onChange={(event) => setContestArea(event.target.value)}
+                        placeholder="Example: Kandara, Murang'a County, Nairobi County"
+                        className="mt-2 h-10 w-full rounded-md border border-white/10 bg-slate-900/90 px-3 text-sm text-white outline-none focus:border-cyan-300"
+                      />
+                      <p className="mt-2 text-xs leading-5 text-slate-400">
+                        The map recenters itself to this contest area and renders uploaded voter intelligence as boundary-focused overlays.
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <div className="absolute left-4 top-16 z-20 w-[calc(100%-2rem)] max-w-sm rounded-md border border-white/10 bg-slate-950/88 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Contest Area</p>
-                  <input
-                    value={contestArea}
-                    onChange={(event) => setContestArea(event.target.value)}
-                    placeholder="Example: Kandara, Murang'a County, Nairobi County"
-                    className="mt-2 h-10 w-full rounded-md border border-white/10 bg-slate-900/90 px-3 text-sm text-white outline-none focus:border-cyan-300"
-                  />
-                  <p className="mt-2 text-xs leading-5 text-slate-400">
-                    The map recenters itself to this contest area and renders uploaded voter intelligence as boundary-focused overlays.
-                  </p>
-                </div>
-                <div className="absolute inset-0">
-                  <LeafletPoliticalMap
-                    regions={regionsForLevel}
-                    selectedRegion={selectedRegion}
-                    onSelectRegion={setSelectedRegion}
-                    visits={visits}
-                    attendees={meetingAttendees}
-                    contestArea={contestAreaLabel}
-                  />
+                <div className="map-grid relative min-h-[420px] flex-1 overflow-hidden">
+                  <div className="absolute inset-0">
+                    <LeafletPoliticalMap
+                      regions={regionsForLevel}
+                      selectedRegion={selectedRegion}
+                      onSelectRegion={setSelectedRegion}
+                      visits={visits}
+                      attendees={meetingAttendees}
+                      contestArea={contestAreaLabel}
+                    />
+                  </div>
                 </div>
                 {activeLayer && activeLayer.level !== mapLevel ? (
-                  <div className="absolute inset-x-6 top-24 z-10 rounded-md border border-amber-300/30 bg-slate-950/90 p-3 text-sm text-amber-100">
+                  <div className="mx-4 my-3 rounded-md border border-amber-300/30 bg-slate-950/90 p-3 text-sm text-amber-100">
                     The active layer is mapped at {activeLayer.level}. Switch back to that level, or upload official boundaries for this zoom level.
                   </div>
                 ) : null}
