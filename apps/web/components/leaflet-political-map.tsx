@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from "react";
 import L, { DivIcon, LatLngBoundsExpression, LatLngExpression, latLngBounds } from "leaflet";
-import { CircleMarker, MapContainer, Marker, Polygon, Popup, TileLayer, Tooltip, useMap } from "react-leaflet";
+import { CircleMarker, MapContainer, Marker, Pane, Polygon, Popup, TileLayer, Tooltip, useMap } from "react-leaflet";
 import { MeetingAttendee, Region } from "@/lib/ops-store";
 
 type VisitRecord = {
@@ -140,6 +140,12 @@ export function LeafletPoliticalMap({
         attribution='&copy; OpenStreetMap contributors &copy; CARTO'
         url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
       />
+      <Pane name="basemap-labels" style={{ zIndex: 350, pointerEvents: "none" }}>
+        <TileLayer
+          attribution='&copy; OpenStreetMap contributors &copy; CARTO'
+          url="https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png"
+        />
+      </Pane>
       <ViewportController contestArea={contestArea} regions={regions} />
       {regions.map((region) =>
         region.boundary?.length ? (
@@ -154,7 +160,9 @@ export function LeafletPoliticalMap({
             }}
             eventHandlers={{ click: () => onSelectRegion(region) }}
           >
-            <Tooltip sticky>{region.name}</Tooltip>
+            <Tooltip sticky permanent direction="center" className="political-map-label">
+              {region.name}
+            </Tooltip>
             <Popup>
               <strong>{region.name}</strong>
               <br />
@@ -174,7 +182,9 @@ export function LeafletPoliticalMap({
             }}
             eventHandlers={{ click: () => onSelectRegion(region) }}
           >
-            <Tooltip sticky>{region.name}</Tooltip>
+            <Tooltip sticky permanent direction="top" offset={[0, -8]} className="political-map-label">
+              {region.name}
+            </Tooltip>
             <Popup>
               <strong>{region.name}</strong>
               <br />
