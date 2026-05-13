@@ -20,7 +20,7 @@ class VoterImportUploadDto {
 
 class ApplyVoterImportDto {
   @IsArray()
-  regions!: Array<{ name: string; registeredVoters: number }>;
+  regions!: Array<{ code?: string; name: string; registeredVoters: number; rowNumber?: number }>;
 }
 
 @Controller("public/voter-imports")
@@ -104,7 +104,7 @@ export class VoterImportsController {
     const appliedRegions = await this.prisma.$transaction(
       regions.map((region) =>
         this.prisma.geoRegion.upsert({
-          where: { tenantId_code: { tenantId: tenant.id, code: this.regionCode(region.name) } },
+          where: { tenantId_code: { tenantId: tenant.id, code: region.code } },
           update: {
             name: region.name,
             level: GeoLevel.POLLING_STATION,
@@ -113,12 +113,13 @@ export class VoterImportsController {
               source: "voter-register-import",
               sourceImportId: record.id,
               sourceFileName: record.fileName,
+              rowNumber: region.rowNumber,
               intelligenceStatus: "actionable"
             } as Prisma.InputJsonValue
           },
           create: {
             tenantId: tenant.id,
-            code: this.regionCode(region.name),
+            code: region.code,
             name: region.name,
             level: GeoLevel.POLLING_STATION,
             registeredVoters: region.registeredVoters,
@@ -126,6 +127,7 @@ export class VoterImportsController {
               source: "voter-register-import",
               sourceImportId: record.id,
               sourceFileName: record.fileName,
+              rowNumber: region.rowNumber,
               intelligenceStatus: "actionable"
             } as Prisma.InputJsonValue
           }
@@ -178,17 +180,27 @@ export class VoterImportsController {
       .split(/\r?\n/)
       .map((line) => line.replace(/\s+/g, " ").trim())
       .filter(Boolean);
-    const regions: Array<{ name: string; registeredVoters: number }> = [];
+    const regions: Array<{ code: string; name: string; registeredVoters: number; rowNumber: number }> = [];
     const errors: Array<{ line?: string; message: string }> = [];
+    let rowNumber = 0;
 
     for (const line of lines) {
-      const match = line.match(/^(.{3,80}?)\s+(\d{1,3}(?:,\d{3})+|\d{4,})$/);
+      if (/^(page|county|constituency|ward|polling\s+station|registered\s+voters|reg\.?\s*voters)$/i.test(line)) continue;
+      if (/^total\b/i.test(line)) continue;
+      const match = line.match(/^(?:\d{1,6}\s+)?(.{2,140}?)\s+(\d{1,3}(?:,\d{3})*|\d+)$/);
       if (!match) continue;
       const name = match[1].replace(/[^A-Za-z0-9\s'./-]/g, "").trim();
       const registeredVoters = Number(match[2].replace(/,/g, ""));
       if (!name || !Number.isFinite(registeredVoters)) continue;
-      if (/total|registered voters|polling station|constituency|county/i.test(name) && registeredVoters < 1000) continue;
-      regions.push({ name, registeredVoters });
+      if (registeredVoters < 1) continue;
+      if (/^(total|registered voters|polling station|constituency|county|ward)$/i.test(name)) continue;
+      rowNumber += 1;
+      regions.push({
+        code: `${this.regionCode(name).slice(0, 48)}-${String(rowNumber).padStart(3, "0")}`,
+        name,
+        registeredVoters,
+        rowNumber
+      });
     }
 
     if (!regions.length) {
@@ -200,25 +212,24 @@ export class VoterImportsController {
     return {
       rowsParsed: regions.length,
       votersTotal: regions.reduce((sum, region) => sum + region.registeredVoters, 0),
-      regions: regions.slice(0, 100),
+      regions,
       errors
     };
   }
 
-  private normalizeRegions(regions: Array<{ name: string; registeredVoters: number }> = []) {
-    const seen = new Map<string, { name: string; registeredVoters: number }>();
-    for (const region of regions) {
+  private normalizeRegions(regions: Array<{ code?: string; name: string; registeredVoters: number; rowNumber?: number }> = []) {
+    return regions.flatMap((region, index) => {
       const name = String(region.name ?? "").replace(/\s+/g, " ").trim();
       const registeredVoters = Number(region.registeredVoters);
-      if (!name || !Number.isFinite(registeredVoters) || registeredVoters < 1) continue;
-      const key = this.regionCode(name);
-      const existing = seen.get(key);
-      seen.set(key, {
+      if (!name || !Number.isFinite(registeredVoters) || registeredVoters < 1) return [];
+      const rowNumber = Number.isFinite(Number(region.rowNumber)) ? Number(region.rowNumber) : index + 1;
+      return [{
+        code: region.code?.trim() || `${this.regionCode(name).slice(0, 48)}-${String(rowNumber).padStart(3, "0")}`,
         name,
-        registeredVoters: (existing?.registeredVoters ?? 0) + Math.round(registeredVoters)
-      });
-    }
-    return [...seen.values()].slice(0, 500);
+        registeredVoters: Math.round(registeredVoters),
+        rowNumber
+      }];
+    });
   }
 
   private regionCode(name: string) {

@@ -3,7 +3,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { commandData, emptyRegion, RegionRecord } from "./production-defaults";
 
 export type Region = RegionRecord;
-export type ImportedVoterRegion = { name: string; registeredVoters: number };
+export type ImportedVoterRegion = { code?: string; name: string; registeredVoters: number; rowNumber?: number };
 export type GisMapLevel = "county" | "constituency" | "ward" | "pollingStation";
 export type GisDataLayer = {
   id: string;
@@ -221,7 +221,7 @@ export function buildVoterMapRegions(regions: ImportedVoterRegion[]): Region[] {
       const risk = 0;
       const momentum = 0;
       return {
-        code: region.name.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 58) || `REGION-${index + 1}`,
+        code: region.code ?? `${region.name.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "REGION"}-${index + 1}`,
         name: region.name,
         support,
         risk,
