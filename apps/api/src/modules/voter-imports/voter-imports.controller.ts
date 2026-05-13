@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post } from "@nestjs/common";
 import { GeoLevel, Prisma } from "@prisma/client";
 import { IsArray, IsOptional, IsString, MinLength } from "class-validator";
 import { PDFParse } from "pdf-parse";
@@ -149,6 +149,24 @@ export class VoterImportsController {
         registeredVoters: region.registeredVoters ?? 0
       }))
     };
+  }
+
+  @Delete(":id")
+  async deleteImport(@Param("id") id: string) {
+    const tenant = await this.ensurePlatformTenant();
+    await this.prisma.geoRegion.deleteMany({
+      where: {
+        tenantId: tenant.id,
+        properties: {
+          path: ["sourceImportId"],
+          equals: id
+        }
+      }
+    });
+    await this.prisma.voterRegisterImport.deleteMany({
+      where: { id, tenantId: tenant.id }
+    });
+    return { ok: true, deletedImportId: id };
   }
 
   private stripDataUrlPrefix(value: string) {

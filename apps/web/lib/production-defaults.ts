@@ -7,6 +7,7 @@ export type RegionRecord = {
   registeredVoters: number;
   x: number;
   y: number;
+  boundary?: Array<{ x: number; y: number }>;
 };
 
 export const emptyRegion: RegionRecord = {

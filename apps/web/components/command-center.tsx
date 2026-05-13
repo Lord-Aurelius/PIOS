@@ -23,8 +23,10 @@ import {
   Plus,
   QrCode,
   Radio,
+  Search,
   ShieldCheck,
   Siren,
+  Trash2,
   Truck,
   UserCog,
   Users,
@@ -33,7 +35,7 @@ import {
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { commandData, emptyRegion } from "@/lib/production-defaults";
-import { CandidateLoginAccount, CreatorAccount, InventoryItem, MeetingAttendee, ModuleKey, Region, ResourceAllocation, StaffMember, useOpsStore, VoterImportJob, WorkspaceRole } from "@/lib/ops-store";
+import { CandidateLoginAccount, CreatorAccount, GisDataLayer, GisMapLevel, InventoryItem, MeetingAttendee, ModuleKey, Region, ResourceAllocation, StaffMember, useOpsStore, VoterImportJob, WorkspaceRole } from "@/lib/ops-store";
 import {
   defaultSurveyQuestions,
   questionTypes,
@@ -86,6 +88,9 @@ export function CommandCenter() {
     uploadedVoterFile,
     voterImportJobs,
     liveVoterRegions,
+    gisDataLayers,
+    activeGisLayerId,
+    mapLevel,
     campaignName,
     candidateName,
     campaignSlogan,
@@ -118,8 +123,13 @@ export function CommandCenter() {
     setUploadedVoterFile,
     queueVoterImport,
     updateVoterImportJob,
+    deleteVoterImportJob,
     setLiveVoterRegions,
     applyVoterImportToMap,
+    addGisDataLayer,
+    deleteGisDataLayer,
+    setActiveGisLayer,
+    setMapLevel,
     addCandidate,
     addVisitToSelectedRegion,
     updateCampaignProfile,
@@ -354,6 +364,12 @@ export function CommandCenter() {
             selectedSignals={selectedSignals}
             setSelectedRegion={setSelectedRegion}
             mapRegions={mapRegions}
+            gisDataLayers={gisDataLayers}
+            activeGisLayerId={activeGisLayerId}
+            mapLevel={mapLevel}
+            setMapLevel={setMapLevel}
+            setActiveGisLayer={setActiveGisLayer}
+            deleteGisDataLayer={deleteGisDataLayer}
             customVisits={customVisits}
             meetingAttendees={meetingAttendees}
             packagedDataEnabled={packagedDataEnabled}
@@ -399,7 +415,9 @@ export function CommandCenter() {
             liveVoterRegions={liveVoterRegions}
             queueVoterImport={queueVoterImport}
             updateVoterImportJob={updateVoterImportJob}
+            deleteVoterImportJob={deleteVoterImportJob}
             applyVoterImportToMap={applyVoterImportToMap}
+            addGisDataLayer={addGisDataLayer}
             packagedDataEnabled={packagedDataEnabled}
           />
         ) : null}
@@ -606,11 +624,24 @@ function ModuleNav({
   );
 }
 
+const mapLevels: Array<{ key: GisMapLevel; label: string }> = [
+  { key: "county", label: "Counties" },
+  { key: "constituency", label: "Constituencies" },
+  { key: "ward", label: "Wards" },
+  { key: "pollingStation", label: "Polling stations" }
+];
+
 function CommandModule({
   selectedRegion,
   selectedSignals,
   setSelectedRegion,
   mapRegions,
+  gisDataLayers,
+  activeGisLayerId,
+  mapLevel,
+  setMapLevel,
+  setActiveGisLayer,
+  deleteGisDataLayer,
   customVisits,
   meetingAttendees,
   packagedDataEnabled,
@@ -620,52 +651,103 @@ function CommandModule({
   selectedSignals: number;
   setSelectedRegion: (region: Region) => void;
   mapRegions: Region[];
+  gisDataLayers: GisDataLayer[];
+  activeGisLayerId: string;
+  mapLevel: GisMapLevel;
+  setMapLevel: (level: GisMapLevel) => void;
+  setActiveGisLayer: (id: string) => void;
+  deleteGisDataLayer: (id: string) => void;
   customVisits: Array<{ title: string; type: string; region: string; attendance: number; sentiment: number; x: number; y: number }>;
   meetingAttendees: MeetingAttendee[];
   packagedDataEnabled: boolean;
   addVisitToSelectedRegion: () => void;
 }) {
+  const [mapZoom, setMapZoom] = useState(1);
+  const [mapOffset, setMapOffset] = useState({ x: 0, y: 0 });
   const visits = [...customVisits, ...(packagedDataEnabled ? commandData.candidateVisits : [])];
   const commandAlerts = packagedDataEnabled ? commandData.alerts : [];
   const commandInsights = packagedDataEnabled ? commandData.insights : [];
   const commandPosts = packagedDataEnabled ? commandData.posts : [];
   const commandReports = packagedDataEnabled ? commandData.reports : [];
+  const activeLayer = gisDataLayers.find((layer) => layer.id === activeGisLayerId);
+  const hasBoundaries = mapRegions.some((region) => region.boundary?.length);
+  const regionsForLevel = activeLayer && activeLayer.level !== mapLevel ? [] : mapRegions;
+  const viewBoxOffset = `${-mapOffset.x} ${-mapOffset.y} ${100 / mapZoom} ${100 / mapZoom}`;
   return (
     <>
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.45fr_.9fr]">
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.8fr)_360px] 2xl:grid-cols-[minmax(0,2.2fr)_380px]">
           <div className="rounded-md border border-white/10 bg-command-900/80 shadow-intel">
             <div className="flex flex-col gap-3 border-b border-white/10 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-white">GIS Political Map</h2>
-                <p className="text-sm text-slate-400">Support, risk, incidents, and mobilization gaps by region</p>
+                <p className="text-sm text-slate-400">Official boundaries when GeoJSON is loaded; voter imports remain selectable intelligence layers</p>
               </div>
-              <div className="flex gap-2 text-xs text-slate-300">
+              <div className="flex flex-wrap gap-2 text-xs text-slate-300">
                 <span className="rounded-sm border border-emerald-300/60 bg-emerald-400/15 px-2 py-1 text-emerald-100">Support</span>
                 <span className="rounded-sm border border-rose-300/60 bg-rose-400/15 px-2 py-1 text-rose-100">Risk</span>
                 <span className="rounded-sm border border-amber-300/60 bg-amber-400/15 px-2 py-1 text-amber-100">Decline</span>
                 <span className="rounded-sm border border-sky-300/60 bg-sky-400/15 px-2 py-1 text-sky-100">Growth</span>
               </div>
             </div>
-            <div className="grid gap-0 lg:grid-cols-[1fr_280px]">
-              <div className="map-grid relative min-h-[420px] overflow-hidden bg-[#07101d]">
+            <div className="grid gap-0 xl:grid-cols-[1fr_300px]">
+              <div className="map-grid relative min-h-[560px] overflow-hidden bg-[#07101d] sm:min-h-[640px] 2xl:min-h-[760px]">
+                <div className="absolute left-4 top-4 z-20 flex flex-wrap gap-2">
+                  {mapLevels.map((level) => (
+                    <button
+                      key={level.key}
+                      onClick={() => setMapLevel(level.key)}
+                      className={`rounded-md border px-3 py-2 text-xs font-semibold ${
+                        mapLevel === level.key ? "border-cyan-200 bg-cyan-300 text-slate-950" : "border-white/10 bg-slate-950/80 text-slate-200 hover:bg-white/10"
+                      }`}
+                    >
+                      {level.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="absolute bottom-4 left-4 z-20 flex overflow-hidden rounded-md border border-white/10 bg-slate-950/85">
+                  <button onClick={() => setMapZoom((value) => Math.max(1, Number((value - 0.25).toFixed(2))))} className="h-10 w-11 border-r border-white/10 text-lg font-semibold text-white">-</button>
+                  <span className="flex h-10 min-w-16 items-center justify-center text-xs font-semibold text-slate-200">{Math.round(mapZoom * 100)}%</span>
+                  <button onClick={() => setMapZoom((value) => Math.min(4, Number((value + 0.25).toFixed(2))))} className="h-10 w-11 border-l border-white/10 text-lg font-semibold text-white">+</button>
+                </div>
+                <div className="absolute bottom-4 right-4 z-20 flex flex-wrap gap-2">
+                  <button onClick={() => setMapOffset((value) => ({ ...value, y: Math.max(-35, value.y - 8) }))} className="rounded-md border border-white/10 bg-slate-950/85 px-3 py-2 text-xs font-semibold text-slate-100">North</button>
+                  <button onClick={() => setMapOffset((value) => ({ ...value, y: Math.min(35, value.y + 8) }))} className="rounded-md border border-white/10 bg-slate-950/85 px-3 py-2 text-xs font-semibold text-slate-100">South</button>
+                  <button onClick={() => setMapOffset((value) => ({ ...value, x: Math.max(-35, value.x - 8) }))} className="rounded-md border border-white/10 bg-slate-950/85 px-3 py-2 text-xs font-semibold text-slate-100">West</button>
+                  <button onClick={() => setMapOffset((value) => ({ ...value, x: Math.min(35, value.x + 8) }))} className="rounded-md border border-white/10 bg-slate-950/85 px-3 py-2 text-xs font-semibold text-slate-100">East</button>
+                </div>
                 <div className="absolute inset-6 rounded-md border border-sky-300/10" />
-                {mapRegions.map((region) => (
+                <svg className="absolute inset-0 h-full w-full" viewBox={viewBoxOffset} preserveAspectRatio="xMidYMid meet">
+                  <path d="M47 4 L56 9 L61 21 L75 31 L82 47 L77 61 L82 74 L68 91 L52 96 L38 88 L25 91 L19 75 L12 61 L18 43 L15 31 L29 17 Z" fill="#0f1b2c" stroke="rgba(125,211,252,.18)" strokeWidth="0.8" />
+                  {regionsForLevel.map((region) =>
+                    region.boundary?.length ? (
+                      <g key={region.code} onClick={() => setSelectedRegion(region)} className="cursor-pointer">
+                        <polygon points={region.boundary.map((point) => `${point.x},${point.y}`).join(" ")} fill={String(regionMapStyle(region, selectedRegion.code === region.code).background)} stroke={selectedRegion.code === region.code ? "#ffffff" : "rgba(226,232,240,.55)"} strokeWidth={selectedRegion.code === region.code ? 0.7 : 0.35} />
+                      </g>
+                    ) : null
+                  )}
+                </svg>
+                {regionsForLevel.filter((region) => !hasBoundaries || !region.boundary?.length).map((region) => (
                   <button
                     key={region.code}
                     onClick={() => setSelectedRegion(region)}
                     className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2"
-                    style={{ left: `${region.x}%`, top: `${region.y}%` }}
+                    style={{ left: `${50 + (region.x - 50) * mapZoom + mapOffset.x}%`, top: `${50 + (region.y - 50) * mapZoom + mapOffset.y}%` }}
                   >
-                    <span className="h-16 w-16 rounded-full border-4" style={regionMapStyle(region, selectedRegion.code === region.code)} />
-                    <span className="max-w-28 rounded-sm bg-slate-950/80 px-2 py-1 text-xs font-medium text-slate-100">
+                    <span className="h-12 w-12 rounded-full border-4 sm:h-16 sm:w-16" style={regionMapStyle(region, selectedRegion.code === region.code)} />
+                    <span className="max-w-28 rounded-sm bg-slate-950/80 px-2 py-1 text-[11px] font-medium text-slate-100 sm:text-xs">
                       {region.name}
                     </span>
                   </button>
                 ))}
-                {!mapRegions.length ? (
+                {activeLayer && activeLayer.level !== mapLevel ? (
+                  <div className="absolute inset-x-6 top-24 z-10 rounded-md border border-amber-300/30 bg-slate-950/90 p-3 text-sm text-amber-100">
+                    The active layer is mapped at {activeLayer.level}. Switch back to that level, or upload official boundaries for this zoom level.
+                  </div>
+                ) : null}
+                {!regionsForLevel.length ? (
                   <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
                     <div className="max-w-md rounded-md border border-sky-300/20 bg-slate-950/80 p-4 text-sm leading-6 text-slate-300">
-                      Upload an IEBC voter-register PDF, review the extracted rows, then apply it to GIS to activate the political map.
+                      Upload an IEBC voter-register PDF or official boundary GeoJSON, then apply it as a selectable GIS layer.
                     </div>
                   </div>
                 ) : null}
@@ -673,7 +755,7 @@ function CommandModule({
                   <button
                     key={visit.title}
                     className="absolute flex -translate-x-1/2 -translate-y-full flex-col items-center gap-1"
-                    style={{ left: `${visit.x}%`, top: `${visit.y - 8}%` }}
+                    style={{ left: `${50 + (visit.x - 50) * mapZoom + mapOffset.x}%`, top: `${50 + (visit.y - 58) * mapZoom + mapOffset.y}%` }}
                     title={visit.title}
                   >
                     <span className="flex h-9 w-9 items-center justify-center rounded-full border border-amber-200 bg-amber-300 text-slate-950 shadow-intel">
@@ -688,7 +770,7 @@ function CommandModule({
                   <button
                     key={`${attendee.phone}-${attendee.attendedAt}`}
                     className="absolute flex -translate-x-1/2 -translate-y-full flex-col items-center gap-1"
-                    style={{ left: `${attendee.x}%`, top: `${attendee.y}%` }}
+                    style={{ left: `${50 + (attendee.x - 50) * mapZoom + mapOffset.x}%`, top: `${50 + (attendee.y - 50) * mapZoom + mapOffset.y}%` }}
                     title={`${attendee.name} / ${attendee.location}`}
                   >
                     <span className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-200 bg-emerald-300 text-slate-950 shadow-intel">
@@ -700,7 +782,25 @@ function CommandModule({
                   </button>
                 ))}
               </div>
-              <aside className="border-t border-white/10 p-4 lg:border-l lg:border-t-0">
+              <aside className="border-t border-white/10 p-4 xl:border-l xl:border-t-0">
+                <div className="mb-4 rounded-md border border-white/10 bg-white/[.035] p-3">
+                  <p className="mb-2 flex items-center gap-2 text-sm font-semibold text-white"><Search size={15} /> Data layers</p>
+                  <div className="space-y-2">
+                    {gisDataLayers.map((layer) => (
+                      <div key={layer.id} className={`rounded-md border p-2 ${layer.id === activeGisLayerId ? "border-cyan-300/60 bg-cyan-300/10" : "border-white/10 bg-slate-950/40"}`}>
+                        <button onClick={() => setActiveGisLayer(layer.id)} className="w-full text-left">
+                          <span className="block text-sm font-semibold text-white">{layer.name}</span>
+                          <span className="text-xs text-slate-400">{layer.regions.length.toLocaleString()} mapped areas / {layer.level}</span>
+                        </button>
+                        <button onClick={() => deleteGisDataLayer(layer.id)} className="mt-2 flex h-8 items-center gap-2 rounded-md border border-rose-300/30 px-2 text-xs font-semibold text-rose-100 hover:bg-rose-300/10">
+                          <Trash2 size={13} />
+                          Delete layer
+                        </button>
+                      </div>
+                    ))}
+                    {!gisDataLayers.length ? <p className="text-xs leading-5 text-slate-500">No candidate GIS layers yet.</p> : null}
+                  </div>
+                </div>
                 <p className="text-sm text-slate-400">Selected region</p>
                 <h3 className="mt-1 text-xl font-semibold text-white">{selectedRegion.name}</h3>
                 {selectedRegion.registeredVoters ? (
@@ -2135,6 +2235,64 @@ function CustomizeModule({
   );
 }
 
+function regionLevelFromFeature(properties: Record<string, unknown>): GisMapLevel {
+  const raw = String(properties.level ?? properties.TYPE ?? properties.type ?? properties.admin_level ?? "").toLowerCase();
+  if (raw.includes("county")) return "county";
+  if (raw.includes("constituency")) return "constituency";
+  if (raw.includes("ward")) return "ward";
+  return "pollingStation";
+}
+
+function extractFirstRing(geometry: { type?: string; coordinates?: unknown }): Array<[number, number]> {
+  if (!geometry?.coordinates) return [];
+  if (geometry.type === "Polygon") return ((geometry.coordinates as Array<Array<[number, number]>>)[0] ?? []).filter(Boolean);
+  if (geometry.type === "MultiPolygon") return ((geometry.coordinates as Array<Array<Array<[number, number]>>>)[0]?.[0] ?? []).filter(Boolean);
+  return [];
+}
+
+function regionsFromGeoJson(json: unknown): { level: GisMapLevel; regions: Region[] } {
+  const collection = json as { features?: Array<{ properties?: Record<string, unknown>; geometry?: { type?: string; coordinates?: unknown } }> };
+  const features = collection.features ?? [];
+  const rings = features.map((feature) => extractFirstRing(feature.geometry ?? {})).filter((ring) => ring.length);
+  const allPoints = rings.flat();
+  const lngs = allPoints.map((point) => point[0]);
+  const lats = allPoints.map((point) => point[1]);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const levels = new Map<GisMapLevel, number>();
+  const regions = features
+    .map((feature, index) => {
+      const properties = feature.properties ?? {};
+      const ring = extractFirstRing(feature.geometry ?? {});
+      if (!ring.length) return undefined;
+      const level = regionLevelFromFeature(properties);
+      levels.set(level, (levels.get(level) ?? 0) + 1);
+      const boundary = ring.map(([lng, lat]) => ({
+        x: 8 + ((lng - minLng) / Math.max(0.000001, maxLng - minLng)) * 84,
+        y: 92 - ((lat - minLat) / Math.max(0.000001, maxLat - minLat)) * 84
+      }));
+      const center = boundary.reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }), { x: 0, y: 0 });
+      const name = String(properties.name ?? properties.NAME ?? properties.shapeName ?? properties.ward ?? properties.constituency ?? `Boundary ${index + 1}`);
+      const voters = Number(properties.registeredVoters ?? properties.voters ?? properties.REGISTERED_VOTERS ?? 0);
+      return {
+        code: name.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 58) || `BOUNDARY-${index + 1}`,
+        name,
+        support: 0,
+        risk: 0,
+        momentum: 0,
+        registeredVoters: Number.isFinite(voters) ? voters : 0,
+        x: center.x / boundary.length,
+        y: center.y / boundary.length,
+        boundary
+      };
+    })
+    .filter(Boolean) as Region[];
+  const level = [...levels.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "ward";
+  return { level, regions };
+}
+
 function VoterImportModule({
   uploadedVoterFile,
   setUploadedVoterFile,
@@ -2142,7 +2300,9 @@ function VoterImportModule({
   liveVoterRegions,
   queueVoterImport,
   updateVoterImportJob,
+  deleteVoterImportJob,
   applyVoterImportToMap,
+  addGisDataLayer,
   packagedDataEnabled
 }: {
   uploadedVoterFile: string;
@@ -2151,9 +2311,12 @@ function VoterImportModule({
   liveVoterRegions: Region[];
   queueVoterImport: (fileName: string) => string;
   updateVoterImportJob: (id: string, patch: Partial<VoterImportJob>) => void;
+  deleteVoterImportJob: (id: string) => void;
   applyVoterImportToMap: (id: string) => Region[];
+  addGisDataLayer: (layer: Omit<GisDataLayer, "id" | "createdAt">) => string;
   packagedDataEnabled: boolean;
 }) {
+  const [boundaryMessage, setBoundaryMessage] = useState("");
   useEffect(() => {
     const activeJobs = voterImportJobs.filter((job) => job.progress < 100);
     if (!activeJobs.length) return;
@@ -2257,6 +2420,41 @@ function VoterImportModule({
     applyVoterImportToMap(job.id);
   }
 
+  async function deleteImport(job: VoterImportJob) {
+    const apiBase = process.env.NEXT_PUBLIC_API_URL;
+    if (apiBase && job.backendId) {
+      try {
+        await fetch(`${apiBase}/api/v1/public/voter-imports/${job.backendId}`, { method: "DELETE" });
+      } catch {
+        // Local deletion still removes the candidate's active layer immediately.
+      }
+      deleteVoterImportJob(job.backendId);
+      return;
+    }
+    deleteVoterImportJob(job.id);
+  }
+
+  function handleBoundaryUpload(file?: File) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = regionsFromGeoJson(JSON.parse(String(reader.result)));
+        if (!parsed.regions.length) throw new Error("No polygon features were found.");
+        addGisDataLayer({
+          name: file.name,
+          source: "official-boundary",
+          level: parsed.level,
+          regions: parsed.regions
+        });
+        setBoundaryMessage(`${file.name} loaded as an official ${parsed.level} boundary layer with ${parsed.regions.length.toLocaleString()} mapped areas.`);
+      } catch (error) {
+        setBoundaryMessage(`Boundary file could not be loaded: ${error instanceof Error ? error.message : "invalid GeoJSON"}.`);
+      }
+    };
+    reader.readAsText(file);
+  }
+
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.85fr_1.15fr]">
       <Panel title="IEBC Voter Register Import" icon={<Database size={20} />}>
@@ -2273,6 +2471,24 @@ function VoterImportModule({
             The parser maps county, constituency, ward, registration centre, polling station, and registered voters.
           </span>
         </label>
+        <label className="mt-4 flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-emerald-300/40 bg-emerald-300/5 p-5 text-center hover:bg-emerald-300/10">
+          <input
+            className="hidden"
+            type="file"
+            accept="application/geo+json,application/json,.geojson,.json"
+            onChange={(event) => handleBoundaryUpload(event.target.files?.[0])}
+          />
+          <MapPin className="mb-3 text-emerald-200" />
+          <span className="font-semibold text-white">Upload official boundary GeoJSON</span>
+          <span className="mt-2 text-sm leading-6 text-slate-400">
+            Use IEBC or administrative county, constituency, ward, or polling-station boundaries for real geography.
+          </span>
+        </label>
+        {boundaryMessage ? (
+          <div className="mt-4 rounded-md border border-emerald-300/30 bg-emerald-300/10 p-3 text-sm text-emerald-100">
+            {boundaryMessage}
+          </div>
+        ) : null}
         {uploadedVoterFile ? (
           <div className="mt-4 rounded-md border border-emerald-300/30 bg-emerald-300/10 p-3 text-sm text-emerald-100">
             Queued for parsing: {uploadedVoterFile}
@@ -2315,6 +2531,10 @@ function VoterImportModule({
                   Apply to GIS Map and Intelligence
                 </button>
               ) : null}
+              <button onClick={() => deleteImport(job)} className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-md border border-rose-300/30 text-sm font-semibold text-rose-100 hover:bg-rose-300/10">
+                <Trash2 size={15} />
+                Delete this import
+              </button>
             </article>
           ))}
         </div>

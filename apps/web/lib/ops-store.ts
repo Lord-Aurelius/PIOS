@@ -4,6 +4,16 @@ import { commandData, emptyRegion, RegionRecord } from "./production-defaults";
 
 export type Region = RegionRecord;
 export type ImportedVoterRegion = { name: string; registeredVoters: number };
+export type GisMapLevel = "county" | "constituency" | "ward" | "pollingStation";
+export type GisDataLayer = {
+  id: string;
+  sourceImportId?: string;
+  name: string;
+  source: "voter-import" | "official-boundary" | "manual";
+  level: GisMapLevel;
+  regions: Region[];
+  createdAt: string;
+};
 export type ModuleKey =
   | "creator"
   | "command"
@@ -112,6 +122,9 @@ type OpsState = {
   uploadedVoterFile: string;
   voterImportJobs: VoterImportJob[];
   liveVoterRegions: Region[];
+  gisDataLayers: GisDataLayer[];
+  activeGisLayerId: string;
+  mapLevel: GisMapLevel;
   campaignName: string;
   candidateName: string;
   campaignSlogan: string;
@@ -144,8 +157,13 @@ type OpsState = {
   setUploadedVoterFile: (uploadedVoterFile: string) => void;
   queueVoterImport: (fileName: string) => string;
   updateVoterImportJob: (id: string, patch: Partial<VoterImportJob>) => void;
+  deleteVoterImportJob: (id: string) => void;
   setLiveVoterRegions: (regions: Region[]) => void;
   applyVoterImportToMap: (id: string, regions?: ImportedVoterRegion[]) => Region[];
+  addGisDataLayer: (layer: Omit<GisDataLayer, "id" | "createdAt">) => string;
+  deleteGisDataLayer: (id: string) => void;
+  setActiveGisLayer: (id: string) => void;
+  setMapLevel: (level: GisMapLevel) => void;
   addCandidate: (candidate: { name: string; office: string; party: string; region: string; userKey: string; username: string; password: string }) => void;
   addVisitToSelectedRegion: () => void;
   updateCampaignProfile: (profile: { campaignName: string; candidateName: string; campaignSlogan: string; brandColor: string }) => void;
@@ -211,6 +229,9 @@ export const useOpsStore = create<OpsState>()(
   uploadedVoterFile: "",
   voterImportJobs: [],
   liveVoterRegions: [],
+  gisDataLayers: [],
+  activeGisLayerId: "",
+  mapLevel: "pollingStation",
   campaignName: "New Campaign Workspace",
   candidateName: "Unassigned Candidate",
   campaignSlogan: "Configure this workspace from onboarding.",
@@ -321,15 +342,61 @@ export const useOpsStore = create<OpsState>()(
     set((state) => ({
       voterImportJobs: state.voterImportJobs.map((job) => (job.id === id ? { ...job, ...patch } : job))
     })),
-  setLiveVoterRegions: (liveVoterRegions) => set({ liveVoterRegions, selectedRegion: liveVoterRegions[0] ?? get().selectedRegion }),
+  deleteVoterImportJob: (id) =>
+    set((state) => {
+      const remainingLayers = state.gisDataLayers.filter((layer) => layer.id !== id && layer.sourceImportId !== id);
+      const activeLayer = remainingLayers.find((layer) => layer.id === state.activeGisLayerId) ?? remainingLayers[0];
+      return {
+        voterImportJobs: state.voterImportJobs.filter((job) => job.id !== id && job.backendId !== id),
+        gisDataLayers: remainingLayers,
+        activeGisLayerId: activeLayer?.id ?? "",
+        liveVoterRegions: activeLayer?.regions ?? [],
+        selectedRegion: activeLayer?.regions[0] ?? emptyRegion
+      };
+    }),
+  setLiveVoterRegions: (liveVoterRegions) =>
+    set((state) => ({
+      liveVoterRegions,
+      selectedRegion: liveVoterRegions[0] ?? state.selectedRegion,
+      gisDataLayers: state.gisDataLayers.length
+        ? state.gisDataLayers
+        : liveVoterRegions.length
+          ? [
+              {
+                id: "backend-voter-layer",
+                name: "Applied backend voter layer",
+                source: "voter-import",
+                level: "pollingStation",
+                regions: liveVoterRegions,
+                createdAt: new Date().toISOString()
+              }
+            ]
+          : state.gisDataLayers,
+      activeGisLayerId: state.activeGisLayerId || (liveVoterRegions.length ? "backend-voter-layer" : "")
+    })),
   applyVoterImportToMap: (id, suppliedRegions) => {
     const job = get().voterImportJobs.find((item) => item.id === id || item.backendId === id);
     const sourceRegions = suppliedRegions ?? job?.regions ?? [];
     const liveVoterRegions = buildVoterMapRegions(sourceRegions);
     if (!liveVoterRegions.length) return [];
+    const layerId = `gis-layer-${Date.now()}`;
     set((state) => ({
       liveVoterRegions,
       selectedRegion: liveVoterRegions[0],
+      gisDataLayers: [
+        {
+          id: layerId,
+          name: job?.fileName ?? "Imported voter register",
+          sourceImportId: job?.backendId,
+          source: "voter-import",
+          level: "pollingStation",
+          regions: liveVoterRegions,
+          createdAt: new Date().toISOString()
+        },
+        ...state.gisDataLayers
+      ],
+      activeGisLayerId: layerId,
+      mapLevel: "pollingStation",
       voterImportJobs: state.voterImportJobs.map((item) =>
         item.id === id || item.backendId === id
           ? {
@@ -345,6 +412,40 @@ export const useOpsStore = create<OpsState>()(
     }));
     return liveVoterRegions;
   },
+  addGisDataLayer: (layer) => {
+    const id = `gis-layer-${Date.now()}`;
+    set((state) => ({
+      gisDataLayers: [{ ...layer, id, createdAt: new Date().toISOString() }, ...state.gisDataLayers],
+      activeGisLayerId: id,
+      liveVoterRegions: layer.regions,
+      selectedRegion: layer.regions[0] ?? state.selectedRegion,
+      mapLevel: layer.level
+    }));
+    return id;
+  },
+  deleteGisDataLayer: (id) =>
+    set((state) => {
+      const remainingLayers = state.gisDataLayers.filter((layer) => layer.id !== id);
+      const activeLayer = state.activeGisLayerId === id ? remainingLayers[0] : remainingLayers.find((layer) => layer.id === state.activeGisLayerId);
+      return {
+        gisDataLayers: remainingLayers,
+        activeGisLayerId: activeLayer?.id ?? "",
+        liveVoterRegions: activeLayer?.regions ?? [],
+        selectedRegion: activeLayer?.regions[0] ?? emptyRegion
+      };
+    }),
+  setActiveGisLayer: (id) =>
+    set((state) => {
+      const layer = state.gisDataLayers.find((item) => item.id === id);
+      if (!layer) return {};
+      return {
+        activeGisLayerId: id,
+        liveVoterRegions: layer.regions,
+        selectedRegion: layer.regions[0] ?? state.selectedRegion,
+        mapLevel: layer.level
+      };
+    }),
+  setMapLevel: (mapLevel) => set({ mapLevel }),
   addCandidate: (candidate) =>
     set((state) => ({
       onboardedCandidates: [{ name: candidate.name, office: candidate.office, party: candidate.party, region: candidate.region }, ...state.onboardedCandidates],
@@ -482,6 +583,9 @@ export const useOpsStore = create<OpsState>()(
       uploadedVoterFile: "",
       voterImportJobs: [],
       liveVoterRegions: [],
+      gisDataLayers: [],
+      activeGisLayerId: "",
+      mapLevel: "pollingStation",
       generatedBriefing: "",
       campaignName: "New Campaign Workspace",
       candidateName: "Unassigned Candidate",
@@ -502,6 +606,9 @@ export const useOpsStore = create<OpsState>()(
         uploadedVoterFile: state.uploadedVoterFile,
         voterImportJobs: state.voterImportJobs,
         liveVoterRegions: state.liveVoterRegions,
+        gisDataLayers: state.gisDataLayers,
+        activeGisLayerId: state.activeGisLayerId,
+        mapLevel: state.mapLevel,
         campaignName: state.campaignName,
         candidateName: state.candidateName,
         campaignSlogan: state.campaignSlogan,
@@ -555,6 +662,9 @@ export const useOpsStore = create<OpsState>()(
               uploadedVoterFile: "",
               voterImportJobs: [],
               liveVoterRegions: [],
+              gisDataLayers: [],
+              activeGisLayerId: "",
+              mapLevel: "pollingStation" as GisMapLevel,
               generatedBriefing: "",
               onboardedCandidates: persisted.onboardedCandidates?.filter((candidate) => !packagedCandidateNames.has(candidate.name)) ?? [],
               platformParties: persisted.platformParties?.filter((party) => !packagedPartyAbbreviations.has(party.abbreviation)) ?? [],
@@ -569,6 +679,9 @@ export const useOpsStore = create<OpsState>()(
           staffPasswords: {},
           approvedSurveySlugs: sanitizedPersisted.approvedSurveySlugs ?? [],
           liveVoterRegions: sanitizedPersisted.liveVoterRegions ?? [],
+          gisDataLayers: sanitizedPersisted.gisDataLayers ?? [],
+          activeGisLayerId: sanitizedPersisted.activeGisLayerId ?? "",
+          mapLevel: sanitizedPersisted.mapLevel ?? ("pollingStation" as GisMapLevel),
           candidateLoginAccounts
         };
       }
