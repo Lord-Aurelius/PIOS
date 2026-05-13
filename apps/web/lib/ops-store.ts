@@ -11,6 +11,7 @@ export type GisDataLayer = {
   name: string;
   source: "voter-import" | "official-boundary" | "manual";
   level: GisMapLevel;
+  contestArea?: string;
   regions: Region[];
   createdAt: string;
 };
@@ -119,6 +120,7 @@ type OpsState = {
   generatedBriefing: string;
   fieldDrafts: Array<{ title: string; region: string; type: string }>;
   selectedParty: string;
+  contestArea: string;
   uploadedVoterFile: string;
   voterImportJobs: VoterImportJob[];
   liveVoterRegions: Region[];
@@ -129,7 +131,7 @@ type OpsState = {
   candidateName: string;
   campaignSlogan: string;
   brandColor: string;
-  customVisits: Array<{ title: string; type: string; region: string; attendance: number; sentiment: number; x: number; y: number }>;
+  customVisits: Array<{ id?: string; title: string; type: string; region: string; attendance: number; sentiment: number; x: number; y: number }>;
   onboardedCandidates: Array<{ name: string; office: string; party: string; region: string }>;
   candidateLoginAccounts: CandidateLoginAccount[];
   deletedCandidateNames: string[];
@@ -154,6 +156,7 @@ type OpsState = {
   generateBriefing: () => void;
   addFieldDraft: (draft: { title: string; region: string; type: string }) => void;
   setSelectedParty: (selectedParty: string) => void;
+  setContestArea: (contestArea: string) => void;
   setUploadedVoterFile: (uploadedVoterFile: string) => void;
   queueVoterImport: (fileName: string) => string;
   updateVoterImportJob: (id: string, patch: Partial<VoterImportJob>) => void;
@@ -166,6 +169,7 @@ type OpsState = {
   setMapLevel: (level: GisMapLevel) => void;
   addCandidate: (candidate: { name: string; office: string; party: string; region: string; userKey: string; username: string; password: string }) => void;
   addVisitToSelectedRegion: () => void;
+  removeCandidateVisit: (visitKey: string) => void;
   updateCampaignProfile: (profile: { campaignName: string; candidateName: string; campaignSlogan: string; brandColor: string }) => void;
   changePassword: (target: string) => void;
   suspendCandidate: (name: string) => void;
@@ -226,6 +230,7 @@ export const useOpsStore = create<OpsState>()(
   generatedBriefing: "",
   fieldDrafts: [],
   selectedParty: "",
+  contestArea: "",
   uploadedVoterFile: "",
   voterImportJobs: [],
   liveVoterRegions: [],
@@ -318,6 +323,7 @@ export const useOpsStore = create<OpsState>()(
     }),
   addFieldDraft: (draft) => set((state) => ({ fieldDrafts: [draft, ...state.fieldDrafts] })),
   setSelectedParty: (selectedParty) => set({ selectedParty }),
+  setContestArea: (contestArea) => set({ contestArea }),
   setUploadedVoterFile: (uploadedVoterFile) => set({ uploadedVoterFile }),
   queueVoterImport: (fileName) => {
     const id = `voter-import-${Date.now()}`;
@@ -367,6 +373,7 @@ export const useOpsStore = create<OpsState>()(
                 name: "Applied backend voter layer",
                 source: "voter-import",
                 level: "pollingStation",
+                contestArea: state.contestArea,
                 regions: liveVoterRegions,
                 createdAt: new Date().toISOString()
               }
@@ -390,6 +397,7 @@ export const useOpsStore = create<OpsState>()(
           sourceImportId: job?.backendId,
           source: "voter-import",
           level: "pollingStation",
+          contestArea: state.contestArea,
           regions: liveVoterRegions,
           createdAt: new Date().toISOString()
         },
@@ -459,6 +467,7 @@ export const useOpsStore = create<OpsState>()(
     set((state) => ({
       customVisits: [
         {
+          id: `visit-${Date.now()}`,
           title: `${state.candidateName} visit to ${state.selectedRegion.name}`,
           type: "Candidate visit",
           region: state.selectedRegion.name,
@@ -469,6 +478,10 @@ export const useOpsStore = create<OpsState>()(
         },
         ...state.customVisits
       ]
+    })),
+  removeCandidateVisit: (visitKey) =>
+    set((state) => ({
+      customVisits: state.customVisits.filter((visit, index) => (visit.id ?? `${visit.title}-${visit.region}-${index}`) !== visitKey)
     })),
   updateCampaignProfile: (profile) => set(profile),
   changePassword: (target) =>
@@ -586,6 +599,7 @@ export const useOpsStore = create<OpsState>()(
       gisDataLayers: [],
       activeGisLayerId: "",
       mapLevel: "pollingStation",
+      contestArea: "",
       generatedBriefing: "",
       campaignName: "New Campaign Workspace",
       candidateName: "Unassigned Candidate",
@@ -603,6 +617,7 @@ export const useOpsStore = create<OpsState>()(
         activeIdentity: state.activeIdentity,
         activeModule: state.activeModule,
         selectedParty: state.selectedParty,
+        contestArea: state.contestArea,
         uploadedVoterFile: state.uploadedVoterFile,
         voterImportJobs: state.voterImportJobs,
         liveVoterRegions: state.liveVoterRegions,
@@ -649,6 +664,7 @@ export const useOpsStore = create<OpsState>()(
               candidateName: currentState.candidateName,
               campaignSlogan: currentState.campaignSlogan,
               selectedParty: "",
+              contestArea: "",
               customVisits: [],
               fieldDrafts: [],
               socialHandles: [],
@@ -682,6 +698,7 @@ export const useOpsStore = create<OpsState>()(
           gisDataLayers: sanitizedPersisted.gisDataLayers ?? [],
           activeGisLayerId: sanitizedPersisted.activeGisLayerId ?? "",
           mapLevel: sanitizedPersisted.mapLevel ?? ("pollingStation" as GisMapLevel),
+          contestArea: sanitizedPersisted.contestArea ?? "",
           candidateLoginAccounts
         };
       }

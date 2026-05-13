@@ -85,6 +85,7 @@ export function CommandCenter() {
     generatedBriefing,
     fieldDrafts,
     selectedParty,
+    contestArea,
     uploadedVoterFile,
     voterImportJobs,
     liveVoterRegions,
@@ -120,6 +121,7 @@ export function CommandCenter() {
     generateBriefing,
     addFieldDraft,
     setSelectedParty,
+    setContestArea,
     setUploadedVoterFile,
     queueVoterImport,
     updateVoterImportJob,
@@ -132,6 +134,7 @@ export function CommandCenter() {
     setMapLevel,
     addCandidate,
     addVisitToSelectedRegion,
+    removeCandidateVisit,
     updateCampaignProfile,
     changePassword,
     suspendCandidate,
@@ -367,13 +370,16 @@ export function CommandCenter() {
             gisDataLayers={gisDataLayers}
             activeGisLayerId={activeGisLayerId}
             mapLevel={mapLevel}
+            contestArea={contestArea}
             setMapLevel={setMapLevel}
+            setContestArea={setContestArea}
             setActiveGisLayer={setActiveGisLayer}
             deleteGisDataLayer={deleteGisDataLayer}
             customVisits={customVisits}
             meetingAttendees={meetingAttendees}
             packagedDataEnabled={packagedDataEnabled}
             addVisitToSelectedRegion={addVisitToSelectedRegion}
+            removeCandidateVisit={removeCandidateVisit}
           />
         ) : null}
 
@@ -418,6 +424,7 @@ export function CommandCenter() {
             deleteVoterImportJob={deleteVoterImportJob}
             applyVoterImportToMap={applyVoterImportToMap}
             addGisDataLayer={addGisDataLayer}
+            contestArea={contestArea}
             packagedDataEnabled={packagedDataEnabled}
           />
         ) : null}
@@ -639,13 +646,16 @@ function CommandModule({
   gisDataLayers,
   activeGisLayerId,
   mapLevel,
+  contestArea,
   setMapLevel,
+  setContestArea,
   setActiveGisLayer,
   deleteGisDataLayer,
   customVisits,
   meetingAttendees,
   packagedDataEnabled,
-  addVisitToSelectedRegion
+  addVisitToSelectedRegion,
+  removeCandidateVisit
 }: {
   selectedRegion: Region;
   selectedSignals: number;
@@ -654,13 +664,16 @@ function CommandModule({
   gisDataLayers: GisDataLayer[];
   activeGisLayerId: string;
   mapLevel: GisMapLevel;
+  contestArea: string;
   setMapLevel: (level: GisMapLevel) => void;
+  setContestArea: (contestArea: string) => void;
   setActiveGisLayer: (id: string) => void;
   deleteGisDataLayer: (id: string) => void;
-  customVisits: Array<{ title: string; type: string; region: string; attendance: number; sentiment: number; x: number; y: number }>;
+  customVisits: Array<{ id?: string; title: string; type: string; region: string; attendance: number; sentiment: number; x: number; y: number }>;
   meetingAttendees: MeetingAttendee[];
   packagedDataEnabled: boolean;
   addVisitToSelectedRegion: () => void;
+  removeCandidateVisit: (visitKey: string) => void;
 }) {
   const [mapZoom, setMapZoom] = useState(1);
   const [mapOffset, setMapOffset] = useState({ x: 0, y: 0 });
@@ -670,6 +683,7 @@ function CommandModule({
   const commandPosts = packagedDataEnabled ? commandData.posts : [];
   const commandReports = packagedDataEnabled ? commandData.reports : [];
   const activeLayer = gisDataLayers.find((layer) => layer.id === activeGisLayerId);
+  const contestAreaLabel = contestArea || activeLayer?.contestArea || "Kenya";
   const hasBoundaries = mapRegions.some((region) => region.boundary?.length);
   const regionsForLevel = activeLayer && activeLayer.level !== mapLevel ? [] : mapRegions;
   const viewBoxOffset = `${-mapOffset.x} ${-mapOffset.y} ${100 / mapZoom} ${100 / mapZoom}`;
@@ -691,6 +705,12 @@ function CommandModule({
             </div>
             <div className="grid gap-0 xl:grid-cols-[1fr_300px]">
               <div className="map-grid relative min-h-[560px] overflow-hidden bg-[#07101d] sm:min-h-[640px] 2xl:min-h-[760px]">
+                <iframe
+                  title="Kenya base map"
+                  src="https://www.openstreetmap.org/export/embed.html?bbox=33.9%2C-5.3%2C41.95%2C5.5&layer=mapnik"
+                  className="absolute inset-0 h-full w-full opacity-70"
+                />
+                <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(5,10,18,.14),rgba(5,10,18,.5))]" />
                 <div className="absolute left-4 top-4 z-20 flex flex-wrap gap-2">
                   {mapLevels.map((level) => (
                     <button
@@ -703,6 +723,18 @@ function CommandModule({
                       {level.label}
                     </button>
                   ))}
+                </div>
+                <div className="absolute left-4 top-16 z-20 w-[calc(100%-2rem)] max-w-sm rounded-md border border-white/10 bg-slate-950/88 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Contest Area</p>
+                  <input
+                    value={contestArea}
+                    onChange={(event) => setContestArea(event.target.value)}
+                    placeholder="Example: Kandara, Murang'a County, Nairobi County"
+                    className="mt-2 h-10 w-full rounded-md border border-white/10 bg-slate-900/90 px-3 text-sm text-white outline-none focus:border-cyan-300"
+                  />
+                  <p className="mt-2 text-xs leading-5 text-slate-400">
+                    OpenStreetMap provides the base map. Your voter imports attach to this contest area while we map them into boundaries.
+                  </p>
                 </div>
                 <div className="absolute bottom-4 left-4 z-20 flex overflow-hidden rounded-md border border-white/10 bg-slate-950/85">
                   <button onClick={() => setMapZoom((value) => Math.max(1, Number((value - 0.25).toFixed(2))))} className="h-10 w-11 border-r border-white/10 text-lg font-semibold text-white">-</button>
@@ -791,6 +823,7 @@ function CommandModule({
                         <button onClick={() => setActiveGisLayer(layer.id)} className="w-full text-left">
                           <span className="block text-sm font-semibold text-white">{layer.name}</span>
                           <span className="text-xs text-slate-400">{layer.regions.length.toLocaleString()} mapped areas / {layer.level}</span>
+                          <span className="mt-1 block text-[11px] text-slate-500">{layer.contestArea || "Kenya-wide layer"}</span>
                         </button>
                         <button onClick={() => deleteGisDataLayer(layer.id)} className="mt-2 flex h-8 items-center gap-2 rounded-md border border-rose-300/30 px-2 text-xs font-semibold text-rose-100 hover:bg-rose-300/10">
                           <Trash2 size={13} />
@@ -803,6 +836,7 @@ function CommandModule({
                 </div>
                 <p className="text-sm text-slate-400">Selected region</p>
                 <h3 className="mt-1 text-xl font-semibold text-white">{selectedRegion.name}</h3>
+                <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">{contestAreaLabel}</p>
                 {selectedRegion.registeredVoters ? (
                   <div className="mt-3 rounded-md border border-cyan-300/20 bg-cyan-300/10 p-3">
                     <p className="text-sm text-cyan-100">Registered voters</p>
@@ -850,6 +884,27 @@ function CommandModule({
                   <MapPin size={16} />
                   Mark Candidate Visit
                 </button>
+                {customVisits.length ? (
+                  <div className="mt-4 rounded-md border border-white/10 bg-white/[.035] p-3">
+                    <p className="text-sm font-semibold text-white">Marked Visits</p>
+                    <div className="mt-3 space-y-2">
+                      {customVisits.slice(0, 6).map((visit, index) => {
+                        const visitKey = visit.id ?? `${visit.title}-${visit.region}-${index}`;
+                        return (
+                          <div key={visitKey} className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-slate-950/50 px-3 py-2">
+                            <div>
+                              <p className="text-sm font-medium text-white">{visit.region}</p>
+                              <p className="text-[11px] text-slate-400">{visit.title}</p>
+                            </div>
+                            <button onClick={() => removeCandidateVisit(visitKey)} className="rounded-md border border-rose-300/30 px-2 py-1 text-xs font-semibold text-rose-100 hover:bg-rose-300/10">
+                              Unmark
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
               </aside>
             </div>
           </div>
@@ -2303,6 +2358,7 @@ function VoterImportModule({
   deleteVoterImportJob,
   applyVoterImportToMap,
   addGisDataLayer,
+  contestArea,
   packagedDataEnabled
 }: {
   uploadedVoterFile: string;
@@ -2314,6 +2370,7 @@ function VoterImportModule({
   deleteVoterImportJob: (id: string) => void;
   applyVoterImportToMap: (id: string) => Region[];
   addGisDataLayer: (layer: Omit<GisDataLayer, "id" | "createdAt">) => string;
+  contestArea: string;
   packagedDataEnabled: boolean;
 }) {
   const [boundaryMessage, setBoundaryMessage] = useState("");
@@ -2445,6 +2502,7 @@ function VoterImportModule({
           name: file.name,
           source: "official-boundary",
           level: parsed.level,
+          contestArea,
           regions: parsed.regions
         });
         setBoundaryMessage(`${file.name} loaded as an official ${parsed.level} boundary layer with ${parsed.regions.length.toLocaleString()} mapped areas.`);
