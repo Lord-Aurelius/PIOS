@@ -61,6 +61,7 @@ export type InventoryItem = {
   unit: string;
   location: string;
   custodian: string;
+  custodianPhone?: string;
   status: string;
 };
 

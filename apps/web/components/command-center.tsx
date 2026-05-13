@@ -475,6 +475,9 @@ export function CommandCenter() {
             fieldAgents={fieldAgents}
             staffMembers={staffMembers}
             meetingAttendees={meetingAttendees}
+            resourceAllocations={resourceAllocations}
+            inventoryItems={inventoryItems}
+            packagedDataEnabled={packagedDataEnabled}
           />
         ) : null}
         {activeModule === "customize" ? (
@@ -733,10 +736,27 @@ function CommandModule({
         continue;
       }
       try {
-        const query = [region.name, contestAreaLabel, activeLayer.level === "pollingStation" ? "polling station" : activeLayer.level, "Kenya"].filter(Boolean).join(", ");
-        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ke&q=${encodeURIComponent(query)}`);
-        const results = response.ok ? ((await response.json()) as Array<{ lat?: string; lon?: string }>) : [];
-        const match = results[0];
+        const cleanedName = region.name
+          .replace(/\b(polling|station|centre|center|stream|registration|code|no\.?)\b/gi, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        const queries = Array.from(
+          new Set(
+            [
+              [region.name, contestAreaLabel, activeLayer.level === "pollingStation" ? "polling station" : activeLayer.level, "Kenya"].filter(Boolean).join(", "),
+              [cleanedName || region.name, contestAreaLabel, "Kenya"].filter(Boolean).join(", "),
+              [cleanedName || region.name, "school hall church", contestAreaLabel, "Kenya"].filter(Boolean).join(", ")
+            ].filter(Boolean)
+          )
+        );
+        let match: { lat?: string; lon?: string } | undefined;
+        for (const query of queries) {
+          const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ke&q=${encodeURIComponent(query)}`);
+          const results = response.ok ? ((await response.json()) as Array<{ lat?: string; lon?: string }>) : [];
+          match = results[0];
+          if (match?.lat && match.lon) break;
+          await new Promise((resolve) => window.setTimeout(resolve, 250));
+        }
         if (match?.lat && match.lon) matched += 1;
         else failed += 1;
         resolvedRegions.push(
@@ -882,6 +902,9 @@ function CommandModule({
                       ) : null}
                     </div>
                   ) : null}
+                  <div className="mt-3 rounded-md border border-white/10 bg-white/[.035] p-3 text-xs leading-5 text-slate-400">
+                    Polling-station matching uses public map search. Some official IEBC stations are stored as schools, churches, halls, or local facilities, so unresolved rows usually mean the public map has no matching facility record or the spelling differs from the register.
+                  </div>
                 </div>
                 <p className="text-sm text-slate-400">Selected region</p>
                 <h3 className="mt-1 text-xl font-semibold text-white">{selectedRegion.name}</h3>
@@ -1317,7 +1340,7 @@ function CrmModule({
   return (
     <Panel title={party ? `${party.name} Contact Registry` : "Candidate Contact Registry"} icon={<Handshake size={20} />}>
       <div className="mb-4 rounded-md border border-sky-300/20 bg-sky-300/10 p-3 text-sm leading-6 text-sky-50">
-        Contacts are populated from candidate meetings, public survey submissions, voter imports, and field-agent collection. No packaged contact records are included in the build.
+        This is the campaign CRM: it ranks known supporters, meeting attendees, and relationship records for follow-up planning. Bulk SMS, WhatsApp, and voice outreach are centralized in Comms.
       </div>
       <div className="grid gap-3 md:grid-cols-3">
         {rankedContacts.map((contact) => (
@@ -1694,6 +1717,7 @@ function InventoryModule({
     unit: "units",
     location: "Main campaign office",
     custodian: "Operations lead",
+    custodianPhone: "",
     status: "Available"
   });
   const totals = useMemo(
@@ -1715,6 +1739,7 @@ function InventoryModule({
             <input value={draft.unit} onChange={(event) => setDraft({ ...draft, unit: event.target.value })} placeholder="Unit" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
             <input value={draft.location} onChange={(event) => setDraft({ ...draft, location: event.target.value })} placeholder="Storage location" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
             <input value={draft.custodian} onChange={(event) => setDraft({ ...draft, custodian: event.target.value })} placeholder="Custodian" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
+            <input value={draft.custodianPhone ?? ""} onChange={(event) => setDraft({ ...draft, custodianPhone: event.target.value })} placeholder="Custodian phone" className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300" />
             <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value })} className="h-11 rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
               <option>Available</option>
               <option>Reserved</option>
@@ -1740,7 +1765,7 @@ function InventoryModule({
               </div>
               <p className="mt-2 text-sm text-slate-300">{item.quantity} {item.unit} / {item.category}</p>
               <p className="mt-2 text-sm text-slate-400">{item.location}</p>
-              <p className="mt-2 text-xs text-slate-500">Custodian: {item.custodian}</p>
+              <p className="mt-2 text-xs text-slate-500">Custodian: {item.custodian}{item.custodianPhone ? ` / ${item.custodianPhone}` : ""}</p>
             </article>
           ))}
         </div>
@@ -1754,25 +1779,61 @@ function CommunicationsModule({
   sendAfricaTalkingMessage,
   fieldAgents,
   staffMembers,
-  meetingAttendees
+  meetingAttendees,
+  resourceAllocations,
+  inventoryItems,
+  packagedDataEnabled
 }: {
   sentMessages: Array<{ target: string; message: string; channel: string; provider: string }>;
   sendAfricaTalkingMessage: (message: { target: string; message: string; channel: string }) => void;
   fieldAgents: Array<{ name: string; phone: string; pollingStation: string; ward: string; status: string }>;
   staffMembers: StaffMember[];
   meetingAttendees: MeetingAttendee[];
+  resourceAllocations: ResourceAllocation[];
+  inventoryItems: InventoryItem[];
+  packagedDataEnabled: boolean;
 }) {
-  const [target, setTarget] = useState("Nairobi West agents");
+  type Recipient = { name: string; phone: string; group: string; detail?: string };
+  const [target, setTarget] = useState("everyone");
   const [channel, setChannel] = useState("SMS");
   const [message, setMessage] = useState("Please submit polling-station updates by 5 PM.");
-  const targetRecipients = useMemo(() => {
-    if (target === "All field agents") return fieldAgents.map((agent) => ({ name: agent.name, phone: agent.phone }));
-    if (target === "All staff") return staffMembers.map((member) => ({ name: member.name, phone: member.phone }));
-    if (target === "Media team") return staffMembers.filter((member) => member.role === "media").map((member) => ({ name: member.name, phone: member.phone }));
-    if (target === "Clerks") return staffMembers.filter((member) => member.role === "clerk").map((member) => ({ name: member.name, phone: member.phone }));
-    if (target === "Meeting attendees") return meetingAttendees.map((attendee) => ({ name: attendee.name, phone: attendee.phone }));
-    return fieldAgents.filter((agent) => agent.ward === "Nairobi West").map((agent) => ({ name: agent.name, phone: agent.phone }));
-  }, [fieldAgents, meetingAttendees, staffMembers, target]);
+  const groupOptions = useMemo(() => {
+    const normalize = (recipients: Recipient[]) => {
+      const seen = new Set<string>();
+      return recipients.filter((recipient) => {
+        const phone = recipient.phone.trim();
+        if (!phone || seen.has(phone)) return false;
+        seen.add(phone);
+        return true;
+      });
+    };
+    const staff = staffMembers.map((member) => ({ name: member.name, phone: member.phone, group: "Staff", detail: member.role }));
+    const media = staffMembers.filter((member) => member.role === "media").map((member) => ({ name: member.name, phone: member.phone, group: "Media team", detail: member.email }));
+    const clerks = staffMembers.filter((member) => member.role === "clerk").map((member) => ({ name: member.name, phone: member.phone, group: "Clerks", detail: member.email }));
+    const agents = fieldAgents.map((agent) => ({ name: agent.name, phone: agent.phone, group: "Field agents", detail: `${agent.ward} / ${agent.pollingStation}` }));
+    const resourceRecipients = resourceAllocations.map((allocation) => ({ name: allocation.recipientName, phone: allocation.recipientPhone, group: "Resource recipients", detail: `${allocation.resource} / ${allocation.location}` }));
+    const attendees = meetingAttendees.map((attendee) => ({ name: attendee.name, phone: attendee.phone, group: "Meeting attendees", detail: attendee.location }));
+    const custodians = inventoryItems.map((item) => ({ name: item.custodian, phone: item.custodianPhone ?? "", group: "Inventory custodians", detail: `${item.name} / ${item.location}` }));
+    const wardGroups = Array.from(new Set(fieldAgents.map((agent) => agent.ward).filter(Boolean))).map((ward) => ({
+      id: `ward:${ward}`,
+      label: `${ward} agents`,
+      recipients: normalize(agents.filter((agent) => agent.detail?.startsWith(`${ward} /`)))
+    }));
+    const baseGroups = [
+      { id: "everyone", label: "Everyone with phone", recipients: normalize([...staff, ...agents, ...resourceRecipients, ...attendees, ...custodians]) },
+      { id: "staff", label: "All staff", recipients: normalize(staff) },
+      { id: "media", label: "Media team", recipients: normalize(media) },
+      { id: "clerks", label: "Clerks", recipients: normalize(clerks) },
+      { id: "agents", label: "All field agents", recipients: normalize(agents) },
+      { id: "resources", label: "Resource recipients", recipients: normalize(resourceRecipients) },
+      { id: "custodians", label: "Inventory custodians", recipients: normalize(custodians) },
+      { id: "attendees", label: "Meeting attendees", recipients: normalize(attendees) }
+    ];
+    return [...baseGroups, ...wardGroups];
+  }, [fieldAgents, inventoryItems, meetingAttendees, resourceAllocations, staffMembers]);
+  const selectedGroup = groupOptions.find((group) => group.id === target) ?? groupOptions[0];
+  const targetRecipients = selectedGroup?.recipients ?? [];
+  const missingCustodianPhones = inventoryItems.filter((item) => item.custodian && !item.custodianPhone?.trim()).length;
 
   function sendBulkMessage() {
     targetRecipients.forEach((recipient) => {
@@ -1782,15 +1843,12 @@ function CommunicationsModule({
 
   return (
     <section className="grid grid-cols-1 gap-4 xl:grid-cols-[.85fr_1.15fr]">
-      <Panel title="Africa's Talking Communications" icon={<MessageSquare size={20} />}>
+      <Panel title="Central Communications" icon={<MessageSquare size={20} />}>
         <div className="space-y-3">
           <select value={target} onChange={(event) => setTarget(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
-            <option>Nairobi West agents</option>
-            <option>All field agents</option>
-            <option>All staff</option>
-            <option>Meeting attendees</option>
-            <option>Media team</option>
-            <option>Clerks</option>
+            {groupOptions.map((group) => (
+              <option key={group.id} value={group.id}>{group.label}</option>
+            ))}
           </select>
           <select value={channel} onChange={(event) => setChannel(event.target.value)} className="h-11 w-full rounded-md border border-white/10 bg-slate-950/60 px-3 text-sm text-white outline-none focus:border-sky-300">
             <option>SMS</option>
@@ -1799,16 +1857,33 @@ function CommunicationsModule({
           </select>
           <textarea value={message} onChange={(event) => setMessage(event.target.value)} className="min-h-28 w-full rounded-md border border-white/10 bg-slate-950/60 p-3 text-sm text-white outline-none focus:border-sky-300" />
           <div className="rounded-md border border-white/10 bg-white/[.035] p-3 text-sm text-slate-300">
-            {targetRecipients.length} recipients selected for this bulk send.
+            {targetRecipients.length} recipients selected from {selectedGroup?.label ?? "selected group"}.
           </div>
-          <button onClick={sendBulkMessage} className="h-11 w-full rounded-md bg-sky-300 font-semibold text-slate-950 hover:bg-sky-200">
+          {missingCustodianPhones ? (
+            <div className="rounded-md border border-amber-300/30 bg-amber-300/10 p-3 text-sm text-amber-100">
+              {missingCustodianPhones} inventory custodians do not have phone numbers yet. Add custodian phones in Inventory before messaging them.
+            </div>
+          ) : null}
+          <button disabled={!targetRecipients.length || !message.trim()} onClick={sendBulkMessage} className="h-11 w-full rounded-md bg-sky-300 font-semibold text-slate-950 hover:bg-sky-200 disabled:cursor-not-allowed disabled:opacity-50">
             Bulk Send via Africa's Talking
           </button>
         </div>
       </Panel>
-      <Panel title="Communication Log" icon={<Radio size={20} />}>
+      <Panel title="Recipients and Communication Log" icon={<Radio size={20} />}>
+        <div className="mb-4 max-h-56 overflow-auto rounded-md border border-white/10 bg-slate-950/45">
+          {targetRecipients.slice(0, 60).map((recipient) => (
+            <div key={`${recipient.phone}-${recipient.group}`} className="grid grid-cols-[1fr_auto] gap-3 border-b border-white/5 px-3 py-2 text-sm last:border-b-0">
+              <span className="min-w-0">
+                <span className="block truncate font-semibold text-white">{recipient.name}</span>
+                <span className="block truncate text-xs text-slate-400">{recipient.group}{recipient.detail ? ` / ${recipient.detail}` : ""}</span>
+              </span>
+              <span className="text-sky-100">{recipient.phone}</span>
+            </div>
+          ))}
+          {!targetRecipients.length ? <p className="p-3 text-sm text-slate-400">No recipients in this group yet.</p> : null}
+        </div>
         <div className="space-y-3">
-          {[...sentMessages, ...commandData.communications.map((item) => ({ target: item.target, message: `${item.count} messages ${item.status.toLowerCase()}`, channel: item.channel, provider: item.provider }))].map((item, index) => (
+          {[...sentMessages, ...(packagedDataEnabled ? commandData.communications.map((item) => ({ target: item.target, message: `${item.count} messages ${item.status.toLowerCase()}`, channel: item.channel, provider: item.provider })) : [])].map((item, index) => (
             <article key={`${item.target}-${index}`} className="rounded-md border border-white/10 bg-white/[.035] p-4">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="font-semibold text-white">{item.target}</h3>
@@ -1820,6 +1895,23 @@ function CommunicationsModule({
           ))}
         </div>
       </Panel>
+      <div className="xl:col-span-2">
+        <Panel title="External API Connections Remaining" icon={<ShieldCheck size={20} />}>
+          <div className="grid gap-3 md:grid-cols-3">
+            {[
+              ["Africa's Talking", "SMS, voice, and WhatsApp delivery keys"],
+              ["WhatsApp Business", "Approved sender, templates, and token"],
+              ["Social platforms", "X, Facebook, TikTok, YouTube, Telegram, and news crawling/API credentials"]
+            ].map(([name, detail]) => (
+              <div key={name} className="rounded-md border border-amber-300/25 bg-amber-300/10 p-4">
+                <h3 className="font-semibold text-white">{name}</h3>
+                <p className="mt-2 text-sm leading-6 text-amber-50">{detail}</p>
+                <p className="mt-3 text-xs uppercase tracking-wide text-amber-200">Awaiting production API key</p>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </div>
     </section>
   );
 }
