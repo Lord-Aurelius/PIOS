@@ -33,6 +33,7 @@ import {
   X
 } from "lucide-react";
 import type React from "react";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { commandData, emptyRegion } from "@/lib/production-defaults";
 import { CandidateLoginAccount, CreatorAccount, GisDataLayer, GisMapLevel, InventoryItem, MeetingAttendee, ModuleKey, Region, ResourceAllocation, StaffMember, useOpsStore, VoterImportJob, WorkspaceRole } from "@/lib/ops-store";
@@ -44,6 +45,11 @@ import {
   SurveyResponse,
   SurveyQuestion
 } from "@/lib/survey-questions";
+
+const LeafletPoliticalMap = dynamic(
+  () => import("@/components/leaflet-political-map").then((mod) => mod.LeafletPoliticalMap),
+  { ssr: false }
+);
 
 type Tone = "positive" | "neutral" | "negative";
 
@@ -57,20 +63,6 @@ function severityClass(severity: string) {
   if (severity === "CRITICAL") return "border-rose-400/60 bg-rose-500/10 text-rose-200";
   if (severity === "HIGH") return "border-amber-400/60 bg-amber-500/10 text-amber-100";
   return "border-sky-400/50 bg-sky-500/10 text-sky-100";
-}
-
-function regionMapStyle(region: Region, selected: boolean) {
-  const importedOnly = region.support === 0 && region.risk === 0 && region.momentum === 0 && region.registeredVoters > 0;
-  const importedFill = region.registeredVoters >= 8000 ? "#e879f9" : region.registeredVoters >= 5000 ? "#f97316" : region.registeredVoters >= 2500 ? "#06b6d4" : "#22c55e";
-  const fill = importedOnly ? importedFill : region.risk >= 70 ? "#ef4444" : region.support >= 58 ? "#22c55e" : region.momentum < 0 ? "#f59e0b" : "#38bdf8";
-  const ring = selected ? "#ffffff" : region.risk >= 70 ? "#fecaca" : region.support >= 58 ? "#bbf7d0" : region.momentum < 0 ? "#fde68a" : "#bae6fd";
-  const importedGlow = region.registeredVoters >= 8000 ? "232,121,249" : region.registeredVoters >= 5000 ? "249,115,22" : region.registeredVoters >= 2500 ? "6,182,212" : "34,197,94";
-  const glow = importedOnly ? importedGlow : region.risk >= 70 ? "239,68,68" : region.support >= 58 ? "34,197,94" : region.momentum < 0 ? "245,158,11" : "56,189,248";
-  return {
-    background: fill,
-    borderColor: ring,
-    boxShadow: `0 0 ${selected ? 34 : 22}px rgba(${glow}, .65)`
-  };
 }
 
 export function CommandCenter() {
@@ -675,11 +667,6 @@ function CommandModule({
   addVisitToSelectedRegion: () => void;
   removeCandidateVisit: (visitKey: string) => void;
 }) {
-  const [mapZoom, setMapZoom] = useState(1);
-  const [mapPan, setMapPan] = useState({ x: 0, y: 0 });
-  const [baseMapBounds, setBaseMapBounds] = useState<[number, number, number, number]>([33.9, -5.3, 41.95, 5.5]);
-  const [isDraggingMap, setIsDraggingMap] = useState(false);
-  const [dragOrigin, setDragOrigin] = useState<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const visits = [...customVisits, ...(packagedDataEnabled ? commandData.candidateVisits : [])];
   const commandAlerts = packagedDataEnabled ? commandData.alerts : [];
   const commandInsights = packagedDataEnabled ? commandData.insights : [];
@@ -687,75 +674,7 @@ function CommandModule({
   const commandReports = packagedDataEnabled ? commandData.reports : [];
   const activeLayer = gisDataLayers.find((layer) => layer.id === activeGisLayerId);
   const contestAreaLabel = contestArea || activeLayer?.contestArea || "Kenya";
-  const hasBoundaries = mapRegions.some((region) => region.boundary?.length);
   const regionsForLevel = activeLayer && activeLayer.level !== mapLevel ? [] : mapRegions;
-  const mapFrameStyle = {
-    transform: `translate(${mapPan.x}px, ${mapPan.y}px) scale(${mapZoom})`,
-    transformOrigin: "center center"
-  } as const;
-  const maxPan = Math.max(0, (mapZoom - 1) * 320);
-  const baseMapSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${baseMapBounds[0]}%2C${baseMapBounds[1]}%2C${baseMapBounds[2]}%2C${baseMapBounds[3]}&layer=mapnik`;
-
-  useEffect(() => {
-    let cancelled = false;
-    async function focusContestArea() {
-      const query = contestAreaLabel.trim();
-      if (!query || query.toLowerCase() === "kenya") {
-        setBaseMapBounds([33.9, -5.3, 41.95, 5.5]);
-        setMapZoom(1);
-        setMapPan({ x: 0, y: 0 });
-        return;
-      }
-      try {
-        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ke&q=${encodeURIComponent(query)}`);
-        if (!response.ok) return;
-        const results = (await response.json()) as Array<{ boundingbox?: [string, string, string, string] }>;
-        const bounds = results[0]?.boundingbox;
-        if (!bounds || cancelled) return;
-        const south = Number(bounds[0]);
-        const north = Number(bounds[1]);
-        const west = Number(bounds[2]);
-        const east = Number(bounds[3]);
-        const padX = Math.max(0.08, (east - west) * 0.16);
-        const padY = Math.max(0.08, (north - south) * 0.16);
-        setBaseMapBounds([west - padX, south - padY, east + padX, north + padY]);
-        setMapZoom(1.12);
-        setMapPan({ x: 0, y: 0 });
-      } catch {
-        // Keep the existing map view if geocoding fails.
-      }
-    }
-    focusContestArea();
-    return () => {
-      cancelled = true;
-    };
-  }, [contestAreaLabel]);
-
-  function clampPan(nextX: number, nextY: number) {
-    return {
-      x: Math.min(maxPan, Math.max(-maxPan, nextX)),
-      y: Math.min(maxPan, Math.max(-maxPan, nextY))
-    };
-  }
-
-  function startMapDrag(event: React.PointerEvent<HTMLDivElement>) {
-    const target = event.target as HTMLElement;
-    if (target.closest("button, input, iframe")) return;
-    setIsDraggingMap(true);
-    setDragOrigin({ x: event.clientX, y: event.clientY, panX: mapPan.x, panY: mapPan.y });
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  function moveMapDrag(event: React.PointerEvent<HTMLDivElement>) {
-    if (!dragOrigin) return;
-    const next = clampPan(dragOrigin.panX + (event.clientX - dragOrigin.x), dragOrigin.panY + (event.clientY - dragOrigin.y));
-    setMapPan(next);
-  }
-
-  function endMapDrag() {
-    setIsDraggingMap(false);
-    setDragOrigin(null);
-  }
 
   return (
     <>
@@ -774,22 +693,7 @@ function CommandModule({
               </div>
             </div>
             <div className="grid gap-0 xl:grid-cols-[1fr_300px]">
-              <div
-                className={`map-grid relative min-h-[560px] overflow-hidden bg-[#07101d] sm:min-h-[640px] 2xl:min-h-[760px] ${isDraggingMap ? "cursor-grabbing" : "cursor-grab"}`}
-                onPointerDown={startMapDrag}
-                onPointerMove={moveMapDrag}
-                onPointerUp={endMapDrag}
-                onPointerCancel={endMapDrag}
-                onPointerLeave={endMapDrag}
-              >
-                <div className="absolute inset-0" style={mapFrameStyle}>
-                  <iframe
-                    title="Kenya base map"
-                    src={baseMapSrc}
-                    className="absolute inset-0 h-full w-full opacity-80"
-                  />
-                  <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(5,10,18,.14),rgba(5,10,18,.5))]" />
-                </div>
+              <div className="map-grid relative min-h-[560px] overflow-hidden bg-[#07101d] sm:min-h-[640px] 2xl:min-h-[760px]">
                 <div className="absolute left-4 top-4 z-20 flex flex-wrap gap-2">
                   {mapLevels.map((level) => (
                     <button
@@ -812,79 +716,24 @@ function CommandModule({
                     className="mt-2 h-10 w-full rounded-md border border-white/10 bg-slate-900/90 px-3 text-sm text-white outline-none focus:border-cyan-300"
                   />
                   <p className="mt-2 text-xs leading-5 text-slate-400">
-                    OpenStreetMap provides the base map. Your voter imports attach to this contest area while we map them into boundaries.
+                    The map recenters itself to this contest area and renders uploaded voter intelligence as boundary-focused overlays.
                   </p>
                 </div>
-                <div className="absolute bottom-4 left-4 z-20 flex overflow-hidden rounded-md border border-white/10 bg-slate-950/85">
-                  <button onClick={() => { setMapZoom((value) => Math.max(1, Number((value - 0.25).toFixed(2)))); setMapPan({ x: 0, y: 0 }); }} className="h-10 w-11 border-r border-white/10 text-lg font-semibold text-white">-</button>
-                  <span className="flex h-10 min-w-16 items-center justify-center text-xs font-semibold text-slate-200">{Math.round(mapZoom * 100)}%</span>
-                  <button onClick={() => setMapZoom((value) => Math.min(4, Number((value + 0.25).toFixed(2))))} className="h-10 w-11 border-l border-white/10 text-lg font-semibold text-white">+</button>
+                <div className="absolute inset-0">
+                  <LeafletPoliticalMap
+                    regions={regionsForLevel}
+                    selectedRegion={selectedRegion}
+                    onSelectRegion={setSelectedRegion}
+                    visits={visits}
+                    attendees={meetingAttendees}
+                    contestArea={contestAreaLabel}
+                  />
                 </div>
-                <div className="absolute inset-6 rounded-md border border-sky-300/10" />
-                <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" style={mapFrameStyle}>
-                  {regionsForLevel.map((region) =>
-                    region.boundary?.length ? (
-                      <g key={region.code} onClick={() => setSelectedRegion(region)} className="cursor-pointer">
-                        <polygon points={region.boundary.map((point) => `${point.x},${point.y}`).join(" ")} fill={String(regionMapStyle(region, selectedRegion.code === region.code).background)} stroke={selectedRegion.code === region.code ? "#ffffff" : "rgba(226,232,240,.55)"} strokeWidth={selectedRegion.code === region.code ? 0.7 : 0.35} />
-                      </g>
-                    ) : null
-                  )}
-                </svg>
-                {regionsForLevel.filter((region) => !hasBoundaries || !region.boundary?.length).map((region) => (
-                  <button
-                    key={region.code}
-                    onClick={() => setSelectedRegion(region)}
-                    className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2"
-                    style={{ left: `calc(${region.x}% + ${mapPan.x}px)`, top: `calc(${region.y}% + ${mapPan.y}px)`, transform: `translate(-50%, -50%) scale(${mapZoom})` }}
-                  >
-                    <span className="h-12 w-12 rounded-full border-4 sm:h-16 sm:w-16" style={regionMapStyle(region, selectedRegion.code === region.code)} />
-                    <span className="max-w-28 rounded-sm bg-slate-950/80 px-2 py-1 text-[11px] font-medium text-slate-100 sm:text-xs">
-                      {region.name}
-                    </span>
-                  </button>
-                ))}
                 {activeLayer && activeLayer.level !== mapLevel ? (
                   <div className="absolute inset-x-6 top-24 z-10 rounded-md border border-amber-300/30 bg-slate-950/90 p-3 text-sm text-amber-100">
                     The active layer is mapped at {activeLayer.level}. Switch back to that level, or upload official boundaries for this zoom level.
                   </div>
                 ) : null}
-                {!regionsForLevel.length ? (
-                  <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
-                    <div className="max-w-md rounded-md border border-sky-300/20 bg-slate-950/80 p-4 text-sm leading-6 text-slate-300">
-                      Upload an IEBC voter-register PDF or official boundary GeoJSON, then apply it as a selectable GIS layer.
-                    </div>
-                  </div>
-                ) : null}
-                {visits.map((visit) => (
-                  <button
-                    key={visit.title}
-                    className="absolute flex -translate-x-1/2 -translate-y-full flex-col items-center gap-1"
-                    style={{ left: `calc(${visit.x}% + ${mapPan.x}px)`, top: `calc(${visit.y - 8}% + ${mapPan.y}px)`, transform: `translate(-50%, -100%) scale(${mapZoom})` }}
-                    title={visit.title}
-                  >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full border border-amber-200 bg-amber-300 text-slate-950 shadow-intel">
-                      <Radio size={16} />
-                    </span>
-                    <span className="max-w-32 rounded-sm bg-slate-950/90 px-2 py-1 text-[11px] font-medium text-amber-100">
-                      Visit
-                    </span>
-                  </button>
-                ))}
-                {meetingAttendees.map((attendee) => (
-                  <button
-                    key={`${attendee.phone}-${attendee.attendedAt}`}
-                    className="absolute flex -translate-x-1/2 -translate-y-full flex-col items-center gap-1"
-                    style={{ left: `calc(${attendee.x}% + ${mapPan.x}px)`, top: `calc(${attendee.y}% + ${mapPan.y}px)`, transform: `translate(-50%, -100%) scale(${mapZoom})` }}
-                    title={`${attendee.name} / ${attendee.location}`}
-                  >
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-200 bg-emerald-300 text-slate-950 shadow-intel">
-                      <Users size={15} />
-                    </span>
-                    <span className="max-w-32 rounded-sm bg-slate-950/90 px-2 py-1 text-[11px] font-medium text-emerald-100">
-                      Meeting
-                    </span>
-                  </button>
-                ))}
               </div>
               <aside className="border-t border-white/10 p-4 xl:border-l xl:border-t-0">
                 <div className="mb-4 rounded-md border border-white/10 bg-white/[.035] p-3">

@@ -34,6 +34,26 @@ textarea {
   background-size: 34px 34px;
 }
 
+.leaflet-container {
+  background: #dce7ef;
+}
+
+.leaflet-control-attribution {
+  background: rgba(5, 10, 18, 0.82) !important;
+  color: #cbd5e1 !important;
+  font-size: 11px !important;
+}
+
+.leaflet-control-attribution a {
+  color: #7dd3fc !important;
+}
+
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: #08101a !important;
+  color: #e5edf7 !important;
+}
+
 .scrollbar-thin::-webkit-scrollbar {
   width: 6px;
 }
