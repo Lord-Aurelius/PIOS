@@ -676,7 +676,10 @@ function CommandModule({
   removeCandidateVisit: (visitKey: string) => void;
 }) {
   const [mapZoom, setMapZoom] = useState(1);
-  const [mapOffset, setMapOffset] = useState({ x: 0, y: 0 });
+  const [mapPan, setMapPan] = useState({ x: 0, y: 0 });
+  const [baseMapBounds, setBaseMapBounds] = useState<[number, number, number, number]>([33.9, -5.3, 41.95, 5.5]);
+  const [isDraggingMap, setIsDraggingMap] = useState(false);
+  const [dragOrigin, setDragOrigin] = useState<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const visits = [...customVisits, ...(packagedDataEnabled ? commandData.candidateVisits : [])];
   const commandAlerts = packagedDataEnabled ? commandData.alerts : [];
   const commandInsights = packagedDataEnabled ? commandData.insights : [];
@@ -686,7 +689,74 @@ function CommandModule({
   const contestAreaLabel = contestArea || activeLayer?.contestArea || "Kenya";
   const hasBoundaries = mapRegions.some((region) => region.boundary?.length);
   const regionsForLevel = activeLayer && activeLayer.level !== mapLevel ? [] : mapRegions;
-  const viewBoxOffset = `${-mapOffset.x} ${-mapOffset.y} ${100 / mapZoom} ${100 / mapZoom}`;
+  const mapFrameStyle = {
+    transform: `translate(${mapPan.x}px, ${mapPan.y}px) scale(${mapZoom})`,
+    transformOrigin: "center center"
+  } as const;
+  const maxPan = Math.max(0, (mapZoom - 1) * 320);
+  const baseMapSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${baseMapBounds[0]}%2C${baseMapBounds[1]}%2C${baseMapBounds[2]}%2C${baseMapBounds[3]}&layer=mapnik`;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function focusContestArea() {
+      const query = contestAreaLabel.trim();
+      if (!query || query.toLowerCase() === "kenya") {
+        setBaseMapBounds([33.9, -5.3, 41.95, 5.5]);
+        setMapZoom(1);
+        setMapPan({ x: 0, y: 0 });
+        return;
+      }
+      try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ke&q=${encodeURIComponent(query)}`);
+        if (!response.ok) return;
+        const results = (await response.json()) as Array<{ boundingbox?: [string, string, string, string] }>;
+        const bounds = results[0]?.boundingbox;
+        if (!bounds || cancelled) return;
+        const south = Number(bounds[0]);
+        const north = Number(bounds[1]);
+        const west = Number(bounds[2]);
+        const east = Number(bounds[3]);
+        const padX = Math.max(0.08, (east - west) * 0.16);
+        const padY = Math.max(0.08, (north - south) * 0.16);
+        setBaseMapBounds([west - padX, south - padY, east + padX, north + padY]);
+        setMapZoom(1.12);
+        setMapPan({ x: 0, y: 0 });
+      } catch {
+        // Keep the existing map view if geocoding fails.
+      }
+    }
+    focusContestArea();
+    return () => {
+      cancelled = true;
+    };
+  }, [contestAreaLabel]);
+
+  function clampPan(nextX: number, nextY: number) {
+    return {
+      x: Math.min(maxPan, Math.max(-maxPan, nextX)),
+      y: Math.min(maxPan, Math.max(-maxPan, nextY))
+    };
+  }
+
+  function startMapDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, input, iframe")) return;
+    setIsDraggingMap(true);
+    setDragOrigin({ x: event.clientX, y: event.clientY, panX: mapPan.x, panY: mapPan.y });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveMapDrag(event: React.PointerEvent<HTMLDivElement>) {
+    if (!dragOrigin) return;
+    const next = clampPan(dragOrigin.panX + (event.clientX - dragOrigin.x), dragOrigin.panY + (event.clientY - dragOrigin.y));
+    setMapPan(next);
+  }
+
+  function endMapDrag() {
+    setIsDraggingMap(false);
+    setDragOrigin(null);
+  }
+
   return (
     <>
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.8fr)_360px] 2xl:grid-cols-[minmax(0,2.2fr)_380px]">
@@ -704,13 +774,22 @@ function CommandModule({
               </div>
             </div>
             <div className="grid gap-0 xl:grid-cols-[1fr_300px]">
-              <div className="map-grid relative min-h-[560px] overflow-hidden bg-[#07101d] sm:min-h-[640px] 2xl:min-h-[760px]">
-                <iframe
-                  title="Kenya base map"
-                  src="https://www.openstreetmap.org/export/embed.html?bbox=33.9%2C-5.3%2C41.95%2C5.5&layer=mapnik"
-                  className="absolute inset-0 h-full w-full opacity-70"
-                />
-                <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(5,10,18,.14),rgba(5,10,18,.5))]" />
+              <div
+                className={`map-grid relative min-h-[560px] overflow-hidden bg-[#07101d] sm:min-h-[640px] 2xl:min-h-[760px] ${isDraggingMap ? "cursor-grabbing" : "cursor-grab"}`}
+                onPointerDown={startMapDrag}
+                onPointerMove={moveMapDrag}
+                onPointerUp={endMapDrag}
+                onPointerCancel={endMapDrag}
+                onPointerLeave={endMapDrag}
+              >
+                <div className="absolute inset-0" style={mapFrameStyle}>
+                  <iframe
+                    title="Kenya base map"
+                    src={baseMapSrc}
+                    className="absolute inset-0 h-full w-full opacity-80"
+                  />
+                  <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(5,10,18,.14),rgba(5,10,18,.5))]" />
+                </div>
                 <div className="absolute left-4 top-4 z-20 flex flex-wrap gap-2">
                   {mapLevels.map((level) => (
                     <button
@@ -737,19 +816,12 @@ function CommandModule({
                   </p>
                 </div>
                 <div className="absolute bottom-4 left-4 z-20 flex overflow-hidden rounded-md border border-white/10 bg-slate-950/85">
-                  <button onClick={() => setMapZoom((value) => Math.max(1, Number((value - 0.25).toFixed(2))))} className="h-10 w-11 border-r border-white/10 text-lg font-semibold text-white">-</button>
+                  <button onClick={() => { setMapZoom((value) => Math.max(1, Number((value - 0.25).toFixed(2)))); setMapPan({ x: 0, y: 0 }); }} className="h-10 w-11 border-r border-white/10 text-lg font-semibold text-white">-</button>
                   <span className="flex h-10 min-w-16 items-center justify-center text-xs font-semibold text-slate-200">{Math.round(mapZoom * 100)}%</span>
                   <button onClick={() => setMapZoom((value) => Math.min(4, Number((value + 0.25).toFixed(2))))} className="h-10 w-11 border-l border-white/10 text-lg font-semibold text-white">+</button>
                 </div>
-                <div className="absolute bottom-4 right-4 z-20 flex flex-wrap gap-2">
-                  <button onClick={() => setMapOffset((value) => ({ ...value, y: Math.max(-35, value.y - 8) }))} className="rounded-md border border-white/10 bg-slate-950/85 px-3 py-2 text-xs font-semibold text-slate-100">North</button>
-                  <button onClick={() => setMapOffset((value) => ({ ...value, y: Math.min(35, value.y + 8) }))} className="rounded-md border border-white/10 bg-slate-950/85 px-3 py-2 text-xs font-semibold text-slate-100">South</button>
-                  <button onClick={() => setMapOffset((value) => ({ ...value, x: Math.max(-35, value.x - 8) }))} className="rounded-md border border-white/10 bg-slate-950/85 px-3 py-2 text-xs font-semibold text-slate-100">West</button>
-                  <button onClick={() => setMapOffset((value) => ({ ...value, x: Math.min(35, value.x + 8) }))} className="rounded-md border border-white/10 bg-slate-950/85 px-3 py-2 text-xs font-semibold text-slate-100">East</button>
-                </div>
                 <div className="absolute inset-6 rounded-md border border-sky-300/10" />
-                <svg className="absolute inset-0 h-full w-full" viewBox={viewBoxOffset} preserveAspectRatio="xMidYMid meet">
-                  <path d="M47 4 L56 9 L61 21 L75 31 L82 47 L77 61 L82 74 L68 91 L52 96 L38 88 L25 91 L19 75 L12 61 L18 43 L15 31 L29 17 Z" fill="#0f1b2c" stroke="rgba(125,211,252,.18)" strokeWidth="0.8" />
+                <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" style={mapFrameStyle}>
                   {regionsForLevel.map((region) =>
                     region.boundary?.length ? (
                       <g key={region.code} onClick={() => setSelectedRegion(region)} className="cursor-pointer">
@@ -763,7 +835,7 @@ function CommandModule({
                     key={region.code}
                     onClick={() => setSelectedRegion(region)}
                     className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2"
-                    style={{ left: `${50 + (region.x - 50) * mapZoom + mapOffset.x}%`, top: `${50 + (region.y - 50) * mapZoom + mapOffset.y}%` }}
+                    style={{ left: `calc(${region.x}% + ${mapPan.x}px)`, top: `calc(${region.y}% + ${mapPan.y}px)`, transform: `translate(-50%, -50%) scale(${mapZoom})` }}
                   >
                     <span className="h-12 w-12 rounded-full border-4 sm:h-16 sm:w-16" style={regionMapStyle(region, selectedRegion.code === region.code)} />
                     <span className="max-w-28 rounded-sm bg-slate-950/80 px-2 py-1 text-[11px] font-medium text-slate-100 sm:text-xs">
@@ -787,7 +859,7 @@ function CommandModule({
                   <button
                     key={visit.title}
                     className="absolute flex -translate-x-1/2 -translate-y-full flex-col items-center gap-1"
-                    style={{ left: `${50 + (visit.x - 50) * mapZoom + mapOffset.x}%`, top: `${50 + (visit.y - 58) * mapZoom + mapOffset.y}%` }}
+                    style={{ left: `calc(${visit.x}% + ${mapPan.x}px)`, top: `calc(${visit.y - 8}% + ${mapPan.y}px)`, transform: `translate(-50%, -100%) scale(${mapZoom})` }}
                     title={visit.title}
                   >
                     <span className="flex h-9 w-9 items-center justify-center rounded-full border border-amber-200 bg-amber-300 text-slate-950 shadow-intel">
@@ -802,7 +874,7 @@ function CommandModule({
                   <button
                     key={`${attendee.phone}-${attendee.attendedAt}`}
                     className="absolute flex -translate-x-1/2 -translate-y-full flex-col items-center gap-1"
-                    style={{ left: `${50 + (attendee.x - 50) * mapZoom + mapOffset.x}%`, top: `${50 + (attendee.y - 50) * mapZoom + mapOffset.y}%` }}
+                    style={{ left: `calc(${attendee.x}% + ${mapPan.x}px)`, top: `calc(${attendee.y}% + ${mapPan.y}px)`, transform: `translate(-50%, -100%) scale(${mapZoom})` }}
                     title={`${attendee.name} / ${attendee.location}`}
                   >
                     <span className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-200 bg-emerald-300 text-slate-950 shadow-intel">
