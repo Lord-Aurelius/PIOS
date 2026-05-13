@@ -2354,29 +2354,36 @@ function extractFirstRing(geometry: { type?: string; coordinates?: unknown }): A
   return [];
 }
 
+function sampleRing(ring: Array<[number, number]>, maxPoints = 220) {
+  if (ring.length <= maxPoints) return ring;
+  const step = Math.ceil(ring.length / maxPoints);
+  const sampled = ring.filter((_, index) => index % step === 0);
+  const first = ring[0];
+  const last = sampled[sampled.length - 1];
+  return first && last && (first[0] !== last[0] || first[1] !== last[1]) ? [...sampled, first] : sampled;
+}
+
 function regionsFromGeoJson(json: unknown): { level: GisMapLevel; regions: Region[] } {
-  const collection = json as { features?: Array<{ properties?: Record<string, unknown>; geometry?: { type?: string; coordinates?: unknown } }> };
-  const features = collection.features ?? [];
+  const collection = json as {
+    type?: string;
+    features?: Array<{ properties?: Record<string, unknown>; geometry?: { type?: string; coordinates?: unknown } }>;
+    properties?: Record<string, unknown>;
+    geometry?: { type?: string; coordinates?: unknown };
+  };
+  const features =
+    collection.type === "Feature" && collection.geometry
+      ? [{ properties: collection.properties, geometry: collection.geometry }]
+      : collection.features ?? [];
   const rings = features.map((feature) => extractFirstRing(feature.geometry ?? {})).filter((ring) => ring.length);
-  const allPoints = rings.flat();
-  const lngs = allPoints.map((point) => point[0]);
-  const lats = allPoints.map((point) => point[1]);
-  const minLng = Math.min(...lngs);
-  const maxLng = Math.max(...lngs);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
   const levels = new Map<GisMapLevel, number>();
   const regions = features
     .map((feature, index) => {
       const properties = feature.properties ?? {};
-      const ring = extractFirstRing(feature.geometry ?? {});
+      const ring = sampleRing(extractFirstRing(feature.geometry ?? {}));
       if (!ring.length) return undefined;
       const level = regionLevelFromFeature(properties);
       levels.set(level, (levels.get(level) ?? 0) + 1);
-      const boundary = ring.map(([lng, lat]) => ({
-        x: 8 + ((lng - minLng) / Math.max(0.000001, maxLng - minLng)) * 84,
-        y: 92 - ((lat - minLat) / Math.max(0.000001, maxLat - minLat)) * 84
-      }));
+      const boundary = ring.map(([lng, lat]) => ({ x: lng, y: lat }));
       const center = boundary.reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }), { x: 0, y: 0 });
       const name = String(properties.name ?? properties.NAME ?? properties.shapeName ?? properties.ward ?? properties.constituency ?? `Boundary ${index + 1}`);
       const voters = Number(properties.registeredVoters ?? properties.voters ?? properties.REGISTERED_VOTERS ?? 0);
@@ -2554,7 +2561,7 @@ function VoterImportModule({
           contestArea,
           regions: parsed.regions
         });
-        setBoundaryMessage(`${file.name} loaded as an official ${parsed.level} boundary layer with ${parsed.regions.length.toLocaleString()} mapped areas.`);
+        setBoundaryMessage(`${file.name} loaded as an official ${parsed.level} boundary layer with ${parsed.regions.length.toLocaleString()} mapped areas. Boundary geometry is kept separate from voter-count imports and is not saved into browser localStorage.`);
       } catch (error) {
         setBoundaryMessage(`Boundary file could not be loaded: ${error instanceof Error ? error.message : "invalid GeoJSON"}.`);
       }
@@ -2575,7 +2582,7 @@ function VoterImportModule({
           <Database className="mb-3 text-sky-200" />
           <span className="font-semibold text-white">Upload IEBC PDF register</span>
           <span className="mt-2 text-sm leading-6 text-slate-400">
-            The parser maps county, constituency, ward, registration centre, polling station, and registered voters.
+            Voter-count path only: extracts county, constituency, ward, polling station, and registered-voter totals from PDF.
           </span>
         </label>
         <label className="mt-4 flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-emerald-300/40 bg-emerald-300/5 p-5 text-center hover:bg-emerald-300/10">
@@ -2588,7 +2595,7 @@ function VoterImportModule({
           <MapPin className="mb-3 text-emerald-200" />
           <span className="font-semibold text-white">Upload official boundary GeoJSON</span>
           <span className="mt-2 text-sm leading-6 text-slate-400">
-            Use IEBC or administrative county, constituency, ward, or polling-station boundaries for real geography.
+            Boundary path only: loads real geography for counties, constituencies, wards, or polling stations without changing voter totals.
           </span>
         </label>
         {boundaryMessage ? (

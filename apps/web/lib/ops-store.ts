@@ -245,6 +245,10 @@ function buildManualContestRegion(name: string): Region {
   };
 }
 
+function persistableGisLayers(layers: GisDataLayer[]) {
+  return layers.filter((layer) => layer.source !== "official-boundary");
+}
+
 export const useOpsStore = create<OpsState>()(
   persist(
     (set, get) => ({
@@ -712,43 +716,46 @@ export const useOpsStore = create<OpsState>()(
     {
       name: "pios-live-state",
       storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({
-        isAuthenticated: state.isAuthenticated,
-        packagedDataEnabled: state.packagedDataEnabled,
-        workspaceRole: state.workspaceRole,
-        activeIdentity: state.activeIdentity,
-        activeModule: state.activeModule,
-        selectedParty: state.selectedParty,
-        contestArea: state.contestArea,
-        uploadedVoterFile: state.uploadedVoterFile,
-        voterImportJobs: state.voterImportJobs,
-        liveVoterRegions: state.liveVoterRegions,
-        gisDataLayers: state.gisDataLayers,
-        activeGisLayerId: state.activeGisLayerId,
-        mapLevel: state.mapLevel,
-        campaignName: state.campaignName,
-        candidateName: state.candidateName,
-        campaignSlogan: state.campaignSlogan,
-        brandColor: state.brandColor,
-        customVisits: state.customVisits,
-        onboardedCandidates: state.onboardedCandidates,
-        candidateLoginAccounts: state.candidateLoginAccounts.map((account) => ({ ...account, password: "" })),
-        deletedCandidateNames: state.deletedCandidateNames,
-        candidateStatuses: state.candidateStatuses,
-        passwordEvents: state.passwordEvents,
-        staffPasswords: {},
-        socialHandles: state.socialHandles,
-        fieldAgents: state.fieldAgents,
-        staffMembers: state.staffMembers,
-        resourceAllocations: state.resourceAllocations,
-        inventoryItems: state.inventoryItems,
-        meetingAttendees: state.meetingAttendees,
-        approvedSurveySlugs: state.approvedSurveySlugs,
-        platformParties: state.platformParties,
-        publishedMessages: state.publishedMessages,
-        sentMessages: state.sentMessages,
-        creatorAccount: { ...state.creatorAccount, password: "" }
-      }),
+      partialize: (state) => {
+        const gisDataLayers = persistableGisLayers(state.gisDataLayers);
+        return {
+          isAuthenticated: state.isAuthenticated,
+          packagedDataEnabled: state.packagedDataEnabled,
+          workspaceRole: state.workspaceRole,
+          activeIdentity: state.activeIdentity,
+          activeModule: state.activeModule,
+          selectedParty: state.selectedParty,
+          contestArea: state.contestArea,
+          uploadedVoterFile: state.uploadedVoterFile,
+          voterImportJobs: state.voterImportJobs,
+          liveVoterRegions: state.liveVoterRegions,
+          gisDataLayers,
+          activeGisLayerId: gisDataLayers.some((layer) => layer.id === state.activeGisLayerId) ? state.activeGisLayerId : "",
+          mapLevel: state.mapLevel,
+          campaignName: state.campaignName,
+          candidateName: state.candidateName,
+          campaignSlogan: state.campaignSlogan,
+          brandColor: state.brandColor,
+          customVisits: state.customVisits,
+          onboardedCandidates: state.onboardedCandidates,
+          candidateLoginAccounts: state.candidateLoginAccounts.map((account) => ({ ...account, password: "" })),
+          deletedCandidateNames: state.deletedCandidateNames,
+          candidateStatuses: state.candidateStatuses,
+          passwordEvents: state.passwordEvents,
+          staffPasswords: {},
+          socialHandles: state.socialHandles,
+          fieldAgents: state.fieldAgents,
+          staffMembers: state.staffMembers,
+          resourceAllocations: state.resourceAllocations,
+          inventoryItems: state.inventoryItems,
+          meetingAttendees: state.meetingAttendees,
+          approvedSurveySlugs: state.approvedSurveySlugs,
+          platformParties: state.platformParties,
+          publishedMessages: state.publishedMessages,
+          sentMessages: state.sentMessages,
+          creatorAccount: { ...state.creatorAccount, password: "" }
+        };
+      },
       merge: (persistedState, currentState) => {
         const persisted = persistedState as Partial<OpsState>;
         const wasPackagedWorkspace = persisted.packagedDataEnabled === true;
@@ -789,6 +796,10 @@ export const useOpsStore = create<OpsState>()(
               candidateStatuses: Object.fromEntries(Object.entries(persisted.candidateStatuses ?? {}).filter(([name]) => !packagedCandidateNames.has(name))) as Record<string, "Active" | "Suspended">
             }
           : persisted;
+        const gisDataLayers = persistableGisLayers(sanitizedPersisted.gisDataLayers ?? []);
+        const activeGisLayerId = gisDataLayers.some((layer) => layer.id === sanitizedPersisted.activeGisLayerId)
+          ? sanitizedPersisted.activeGisLayerId ?? ""
+          : "";
         return {
           ...currentState,
           ...sanitizedPersisted,
@@ -797,8 +808,8 @@ export const useOpsStore = create<OpsState>()(
           staffPasswords: {},
           approvedSurveySlugs: sanitizedPersisted.approvedSurveySlugs ?? [],
           liveVoterRegions: sanitizedPersisted.liveVoterRegions ?? [],
-          gisDataLayers: sanitizedPersisted.gisDataLayers ?? [],
-          activeGisLayerId: sanitizedPersisted.activeGisLayerId ?? "",
+          gisDataLayers,
+          activeGisLayerId,
           mapLevel: sanitizedPersisted.mapLevel ?? ("pollingStation" as GisMapLevel),
           contestArea: sanitizedPersisted.contestArea ?? "",
           candidateLoginAccounts
