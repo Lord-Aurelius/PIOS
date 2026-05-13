@@ -217,6 +217,19 @@ export function buildVoterMapRegions(regions: ImportedVoterRegion[]): Region[] {
     });
 }
 
+function buildManualContestRegion(name: string): Region {
+  return {
+    code: name.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 58) || `MANUAL-${Date.now()}`,
+    name,
+    support: 0,
+    risk: 0,
+    momentum: 0,
+    registeredVoters: 0,
+    x: 50,
+    y: 50
+  };
+}
+
 export const useOpsStore = create<OpsState>()(
   persist(
     (set, get) => ({
@@ -464,21 +477,56 @@ export const useOpsStore = create<OpsState>()(
       candidateStatuses: { ...state.candidateStatuses, [candidate.name]: "Active" }
     })),
   addVisitToSelectedRegion: () =>
-    set((state) => ({
-      customVisits: [
-        {
-          id: `visit-${Date.now()}`,
-          title: `${state.candidateName} visit to ${state.selectedRegion.name}`,
-          type: "Candidate visit",
-          region: state.selectedRegion.name,
-          attendance: 0,
-          sentiment: 0,
-          x: state.selectedRegion.x,
-          y: state.selectedRegion.y
-        },
-        ...state.customVisits
-      ]
-    })),
+    set((state) => {
+      const fallbackName = state.contestArea.trim();
+      const existingManualRegion = fallbackName
+        ? state.liveVoterRegions.find((region) => region.name.toLowerCase() === fallbackName.toLowerCase())
+        : undefined;
+      const derivedRegion =
+        state.selectedRegion.code !== emptyRegion.code
+          ? state.selectedRegion
+          : existingManualRegion ?? (fallbackName ? buildManualContestRegion(fallbackName) : emptyRegion);
+      const needsManualLayer =
+        derivedRegion.code !== emptyRegion.code &&
+        state.selectedRegion.code === emptyRegion.code &&
+        !existingManualRegion;
+      const manualLayerId = needsManualLayer ? `manual-layer-${Date.now()}` : state.activeGisLayerId;
+      return {
+        selectedRegion: derivedRegion,
+        liveVoterRegions: needsManualLayer ? [derivedRegion, ...state.liveVoterRegions] : state.liveVoterRegions,
+        gisDataLayers: needsManualLayer
+          ? [
+              {
+                id: manualLayerId,
+                name: `${fallbackName} manual region`,
+                source: "manual",
+                level: state.mapLevel,
+                contestArea: fallbackName,
+                regions: [derivedRegion]
+                ,
+                createdAt: new Date().toISOString()
+              },
+              ...state.gisDataLayers
+            ]
+          : state.gisDataLayers,
+        activeGisLayerId: needsManualLayer ? manualLayerId : state.activeGisLayerId,
+        customVisits: derivedRegion.code === emptyRegion.code
+          ? state.customVisits
+          : [
+              {
+                id: `visit-${Date.now()}`,
+                title: `${state.candidateName} visit to ${derivedRegion.name}`,
+                type: "Candidate visit",
+                region: derivedRegion.name,
+                attendance: 0,
+                sentiment: 0,
+                x: derivedRegion.x,
+                y: derivedRegion.y
+              },
+              ...state.customVisits
+            ]
+      };
+    }),
   removeCandidateVisit: (visitKey) =>
     set((state) => ({
       customVisits: state.customVisits.filter((visit, index) => (visit.id ?? `${visit.title}-${visit.region}-${index}`) !== visitKey)
